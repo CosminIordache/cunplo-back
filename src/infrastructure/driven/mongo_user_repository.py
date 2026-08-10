@@ -32,7 +32,7 @@ class MongoUserRepository:
     return _to_user(doc) if doc else None
 
   async def list(self) -> list[User]:
-    # ponytail: sin paginación, añade skip/limit cuando la colección crezca
+    # Sin paginación, añade skip/limit cuando la colección crezca
     return [_to_user(d) async for d in self.collection.find()]
 
   async def update(self, user_id: ObjectId, changes: dict) -> Optional[User]:
