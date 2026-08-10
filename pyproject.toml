@@ -5,5 +5,22 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.141.1",
+    "dependency-injector>=4.49.1",
+    "dotenv>=0.9.9",
+    "fastapi[standard]>=0.141.1",
+    "httptools>=0.8.0",
+    "motor>=3.7.1",
+    "pydantic-ai-slim[cli,openai]>=2.26.0",
+    "pydantic-extra-types[all]>=2.11.1",
+    "uvloop>=0.22.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]

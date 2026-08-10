@@ -1,0 +1,10 @@
+{
+  "lspServers": {
+    "python": [
+      "pyright-langserver",
+      "--stdio"
+    ]
+  },
+  "iconTheme": "none",
+  "sidebarWidth": 25
+}
