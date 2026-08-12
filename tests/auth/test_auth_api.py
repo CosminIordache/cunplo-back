@@ -21,6 +21,13 @@ def test_register_returns_token_and_hashes_password(client, payload, repository)
   assert stored.password != payload["password"]
 
 
+def test_register_without_phone(client, payload):
+  del payload["phone"]
+  response = client.post("/api/v1/auth/register", json=payload)
+  assert response.status_code == 201, response.text
+  assert response.json()["user"]["phone"] is None
+
+
 def test_register_rejects_duplicate_email(client, payload):
   client.post("/api/v1/auth/register", json=payload)
   assert client.post("/api/v1/auth/register", json=payload).status_code == 409

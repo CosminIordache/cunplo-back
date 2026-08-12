@@ -12,7 +12,7 @@ class User:
   username: str
   email: EmailStr
   password: Optional[str]
-  phone: str
+  phone: Optional[str]
   timezone: TimeZoneName
   language: LanguageAlpha2
 

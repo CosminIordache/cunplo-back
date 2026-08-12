@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, EmailStr
 from pydantic_extra_types.timezone_name import TimeZoneName
 from pydantic_extra_types.language_code import LanguageAlpha2
@@ -9,7 +11,7 @@ class RegisterIn(BaseModel):
   username: str
   email: EmailStr
   password: str
-  phone: str
+  phone: Optional[str] = None
   timezone: TimeZoneName
   language: LanguageAlpha2
 
