@@ -2,7 +2,7 @@ import pytest
 from bson import ObjectId
 
 from src.domain.user import User
-from src.application.use_cases.user_service import UserService
+from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
 from tests.users.conftest import PAYLOAD
 
 pytestmark = pytest.mark.asyncio
@@ -24,8 +24,14 @@ async def test_get_returns_none_when_missing(service):
 
 async def test_list_returns_all(service):
   await service.create(User(**PAYLOAD))
-  await service.create(User(**{**PAYLOAD, "username": "otro"}))
+  await service.create(User(**{**PAYLOAD, "username": "otro", "email": "otro@example.com"}))
   assert len(await service.list()) == 2
+
+
+async def test_create_rejects_duplicate_email(service):
+  await service.create(User(**PAYLOAD))
+  with pytest.raises(EmailAlreadyUsed):
+    await service.create(User(**PAYLOAD))
 
 
 async def test_update_changes_field(service):

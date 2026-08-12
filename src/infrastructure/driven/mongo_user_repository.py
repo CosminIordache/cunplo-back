@@ -31,6 +31,10 @@ class MongoUserRepository:
     doc = await self.collection.find_one({"_id": user_id})
     return _to_user(doc) if doc else None
 
+  async def get_by_email(self, email: str) -> Optional[User]:
+    doc = await self.collection.find_one({"email": email})
+    return _to_user(doc) if doc else None
+
   async def list(self) -> list[User]:
     # Sin paginación, añade skip/limit cuando la colección crezca
     return [_to_user(d) async for d in self.collection.find()]

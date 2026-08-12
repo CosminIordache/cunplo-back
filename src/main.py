@@ -1,14 +1,26 @@
+import os
+
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 from src.container import Container
-from src.presentation.api.router import user
+from src.presentation.api.router import auth, user
 
 container = Container()
 app = FastAPI()
 app.container = container
 app.include_router(user.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
+
+# Sesión firmada (itsdangerous): la necesita el flujo OAuth de Authlib para el state
+app.add_middleware(
+    SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "dev-secret-change-me")
+)
 
 app.add_middleware(
     CORSMiddleware,

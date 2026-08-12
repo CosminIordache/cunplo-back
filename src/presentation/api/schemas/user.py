@@ -5,15 +5,6 @@ from pydantic_extra_types.timezone_name import TimeZoneName
 from pydantic_extra_types.language_code import LanguageAlpha2
 
 
-class UserCreate(BaseModel):
-  username: str
-  email: EmailStr
-  password: Optional[str] = None
-  phone: str
-  timezone: TimeZoneName
-  language: LanguageAlpha2
-
-
 class UserUpdate(BaseModel):
   username: Optional[str] = None
   email: Optional[EmailStr] = None

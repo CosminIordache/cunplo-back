@@ -19,6 +19,9 @@ class FakeUserRepository:
   async def get(self, user_id):
     return self.users.get(user_id)
 
+  async def get_by_email(self, email):
+    return next((u for u in self.users.values() if u.email == email), None)
+
   async def list(self):
     return list(self.users.values())
 
@@ -62,4 +65,24 @@ def overrides(repository) -> dict:
 
 @pytest.fixture
 def created_id(client, payload) -> str:
-  return client.post("/api/v1/users/create", json=payload).json()["id"]
+  """Registra un usuario y deja su Bearer puesto en el cliente: /users lo exige."""
+  body = client.post("/api/v1/auth/register", json=payload).json()
+  client.headers["Authorization"] = f"Bearer {body['access_token']}"
+  return body["user"]["id"]
+
+
+@pytest.fixture
+def other_user(client, created_id, payload) -> dict:
+  """Segundo usuario; el cliente conserva el Bearer de `created_id`."""
+  other = {**payload, "email": "otro@example.com"}
+  return client.post("/api/v1/auth/register", json=other).json()
+
+
+@pytest.fixture
+def other_id(other_user) -> str:
+  return other_user["user"]["id"]
+
+
+@pytest.fixture
+def other_token(other_user) -> str:
+  return other_user["access_token"]

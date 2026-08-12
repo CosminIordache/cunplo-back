@@ -5,10 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "authlib>=1.7.2",
     "dependency-injector>=4.49.1",
     "dotenv>=0.9.9",
     "fastapi[standard]>=0.141.1",
     "httptools>=0.8.0",
+    "itsdangerous>=2.2.0",
+    "joserfc>=1.7.4",
     "motor>=3.7.1",
     "pydantic-ai-slim[cli,openai]>=2.26.0",
     "pydantic-extra-types[all]>=2.11.1",
