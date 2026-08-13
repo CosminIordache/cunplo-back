@@ -3,7 +3,7 @@ from bson import ObjectId
 
 from src.domain.user import User
 from src.application.ports.user_repository import UserRepository
-from src.infrastructure.driven.security import hash_password
+from src.infrastructure.utils.security import hash_password
 
 
 class EmailAlreadyUsed(Exception):

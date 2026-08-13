@@ -11,7 +11,7 @@ from joserfc.errors import JoseError
 from src.container import Container
 from src.domain.user import User
 from src.application.use_cases.auth_service import AuthService
-from src.infrastructure.driven.security import decode_token
+from src.infrastructure.utils.security import decode_token
 
 bearer = HTTPBearer()
 

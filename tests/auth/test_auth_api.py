@@ -1,4 +1,4 @@
-from src.infrastructure.driven.security import hash_password, verify_password
+from src.infrastructure.utils.security import hash_password, verify_password
 
 
 def test_password_hash_roundtrip():

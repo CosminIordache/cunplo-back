@@ -2,7 +2,7 @@ from typing import Optional
 
 from src.domain.user import User
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
-from src.infrastructure.driven.security import create_token, verify_password
+from src.infrastructure.utils.security import create_token, verify_password
 
 __all__ = ["AuthService", "EmailAlreadyUsed", "InvalidCredentials"]
 
@@ -23,6 +23,22 @@ class AuthService:
     user = await self.users.get_by_email(email)
     if not user or not user.password or not verify_password(password, user.password):
       raise InvalidCredentials
+    return user, create_token(str(user.id))
+
+  async def login_google(self, claims: dict) -> tuple[User, str]:
+    """Alta o login con los claims del id_token (el email ya viene verificado)."""
+    user = await self.users.get_by_email(claims["email"])
+    if not user:
+      user = await self.users.create(
+        User(
+          username=claims.get("name") or claims["email"].split("@")[0],
+          email=claims["email"],
+          password=None, 
+          phone=None,
+          timezone="UTC",
+          language="en",
+        )
+      )
     return user, create_token(str(user.id))
 
   async def current(self, user_id) -> Optional[User]:
