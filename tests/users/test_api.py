@@ -1,4 +1,9 @@
+from datetime import datetime, timedelta, UTC
+
 from bson import ObjectId
+
+from src.domain.integration import Integration, Provider
+from src.infrastructure.driven import gmail, google_oauth
 
 
 def test_requires_token(client):
@@ -69,11 +74,35 @@ def test_delete_other_user_returns_403(client, other_id):
   assert client.delete(f"/api/v1/users/{other_id}").status_code == 403
 
 
-def test_delete_removes_user(client, created_id, other_id, other_token):
+def test_delete_removes_user(client, created_id, other_id, login_as_other):
   assert client.delete(f"/api/v1/users/{created_id}").status_code == 204
-  # el token de created_id ya no resuelve: se comprueba con el del otro usuario
-  body = client.get("/api/v1/users/list", headers={"Authorization": f"Bearer {other_token}"})
+  # la cookie de created_id ya no resuelve: se comprueba con la del otro usuario
+  login_as_other()
+  body = client.get("/api/v1/users/list")
   assert [u["id"] for u in body.json()] == [other_id]
+
+
+async def test_delete_user_removes_their_integration(
+  client, created_id, integration_repository, monkeypatch
+):
+  """Borrar la cuenta no puede dejar la integración de Google viva."""
+  async def noop(*args):
+    return None
+
+  monkeypatch.setattr(gmail, "stop_watch", noop)
+  monkeypatch.setattr(google_oauth, "revoke_token", noop)
+
+  user_id = ObjectId(created_id)
+  await integration_repository.upsert(
+    Integration(
+      user_id=user_id, provider=Provider.GOOGLE, account_id="g-1",
+      email="ada@example.com", scopes=[], refresh_token="rt", access_token="at",
+      expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+  )
+
+  assert client.delete(f"/api/v1/users/{created_id}").status_code == 204
+  assert await integration_repository.list_by_user(user_id) == []
 
 
 def test_deleted_user_token_is_rejected(client, created_id):

@@ -7,9 +7,16 @@ from datetime import datetime, timedelta, UTC
 from joserfc import jwt
 from joserfc.jwk import OctKey
 
-JWT_SECRET = os.getenv("JWT_SECRET", "")
+JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALG = "HS256"
 JWT_TTL = timedelta(days=int(os.getenv("JWT_TTL_DAYS", "1")))
+
+# No la llames "session": SessionMiddleware usa ese nombre para el state de OAuth
+# y al vaciarse emite su propio Set-Cookie que borraría esta.
+COOKIE_NAME = "access_token"
+# En dev el front va por el proxy de Vite, así que la cookie es same-site y no
+# necesita HTTPS. COOKIE_SECURE=1 en producción.
+COOKIE_SECURE = os.getenv("COOKIE_SECURE") == "1"
 
 if not JWT_SECRET:
   raise RuntimeError("JWT_SECRET don't exist (Create it in the .ENV))")
@@ -41,6 +48,19 @@ def create_token(subject: str) -> str:
     "exp": int((now + JWT_TTL).timestamp()),
   }
   return jwt.encode({"alg": JWT_ALG}, claims, _key)
+
+
+def set_session_cookie(response, token: str) -> None:
+  """Guarda el JWT como cookie httponly; el front nunca lo ve."""
+  response.set_cookie(
+    COOKIE_NAME,
+    token,
+    max_age=int(JWT_TTL.total_seconds()),
+    httponly=True,
+    secure=COOKIE_SECURE,
+    samesite="lax",
+    path="/",
+  )
 
 
 def decode_token(token: str) -> dict:

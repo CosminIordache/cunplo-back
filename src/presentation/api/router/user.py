@@ -1,9 +1,11 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from dependency_injector.wiring import inject, Provide
 
 from src.container import Container
+from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
+from src.infrastructure.utils.security import COOKIE_NAME
 from src.presentation.api.schemas.user import UserUpdate, UserOut
 from src.presentation.middleware.auth import CurrentUser, get_current_user
 from src.presentation.utils.to_object_id import ObjectIdParam
@@ -15,6 +17,7 @@ router = APIRouter(
 
 
 Service = Annotated[UserService, Depends(Provide[Container.user_service])]
+Gmail = Annotated[GmailService, Depends(Provide[Container.gmail_service])]
 
 @router.get("/list", response_model=list[UserOut])
 @inject
@@ -52,8 +55,17 @@ async def update_user(
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 @inject
-async def delete_user(id: ObjectIdParam, service: Service, current: CurrentUser):
+async def delete_user(
+  id: ObjectIdParam,
+  service: Service,
+  gmail_service: Gmail,
+  current: CurrentUser,
+  response: Response,
+):
   if id != current.id:
     raise HTTPException(status.HTTP_403_FORBIDDEN, "not your user")
+  # primero Google: si el borrado falla, mejor sobra una revocación que un acceso vivo
+  await gmail_service.disconnect(id)
   if not await service.delete(id):
     raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+  response.delete_cookie(COOKIE_NAME, path="/")

@@ -46,7 +46,9 @@ def test_callback_creates_user_and_integration(
 ):
   response = client.get("/api/v1/auth/google/callback", follow_redirects=False)
   assert response.status_code == 307
-  assert "#token=" in response.headers["location"]
+  # SessionMiddleware emite su propio Set-Cookie: la nuestra debe sobrevivir entera
+  assert response.cookies["access_token"]
+  assert "#token=" not in response.headers["location"]
 
   user = next(iter(repository.users.values()))
   assert user.email == CLAIMS["email"]

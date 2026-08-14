@@ -17,6 +17,24 @@ def _in(seconds: int) -> float:
   return (datetime.now(UTC) + timedelta(seconds=seconds)).timestamp()
 
 
+def test_is_expired_handles_naive_dates_from_mongo():
+  """Mongo devuelve datetimes sin zona: comparar no debe reventar."""
+  from src.domain.integration import Integration
+
+  def build(expires_at):
+    return Integration(
+      user_id=ObjectId(), provider=Provider.GOOGLE, account_id="g", email="a@b.c",
+      scopes=[], refresh_token="r", access_token="a", expires_at=expires_at,
+    )
+
+  naive_future = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1)
+  naive_past = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
+
+  assert build(naive_future).is_expired() is False
+  assert build(naive_past).is_expired() is True
+  assert build(None).is_expired() is True
+
+
 def make_service(repository, refresh=None) -> IntegrationService:
   async def unused(provider, token):
     raise AssertionError("no debería refrescar")
@@ -132,13 +150,73 @@ async def test_access_token_raises_without_refresh_token(integration_repository)
   with pytest.raises(ReauthRequired):
     await service.access_token_for(saved)
 
+async def test_refresh_asks_for_the_gmail_scope(monkeypatch):
+  """Dos fallos vistos en producción: url= duplicada y un refresh sin el scope de Gmail
+  (Google devolvía un token de solo login y Gmail respondía 403)."""
+  from authlib.integrations.httpx_client import AsyncOAuth2Client
+  from src.infrastructure.driven import google_oauth
 
-async def test_disconnect_is_scoped_to_owner(integration_repository):
+  seen = {}
+
+  async def fake_post(self, url, **kwargs):
+    seen.update(url=url, data=kwargs.get("data"))
+    import httpx
+
+    return httpx.Response(
+      200,
+      json={"access_token": "nuevo", "expires_in": 3599},
+      request=httpx.Request("POST", url),
+    )
+
+  async def metadata(self):
+    return {"token_endpoint": "https://oauth2.googleapis.com/token"}
+
+  monkeypatch.setattr(type(google_oauth.google), "load_server_metadata", metadata)
+  monkeypatch.setattr(AsyncOAuth2Client, "post", fake_post)
+
+  token = await google_oauth.refresh_token(Provider.GOOGLE, "rt-viejo")
+
+  assert token["access_token"] == "nuevo"
+  assert seen["url"] == "https://oauth2.googleapis.com/token"
+  assert seen["data"]["refresh_token"] == "rt-viejo"
+  assert "gmail.readonly" in seen["data"]["scope"]
+
+
+async def test_connect_with_another_account_replaces_it(integration_repository):
+  """Una integración por usuario y provider: la segunda cuenta sustituye a la primera."""
   service = make_service(integration_repository)
-  owner = ObjectId()
-  saved = await service.connect(
-    owner, Provider.GOOGLE, CLAIMS["sub"], CLAIMS["email"], [], {"access_token": "a"}
+  user_id = ObjectId()
+  first = await service.connect(
+    user_id, Provider.GOOGLE, CLAIMS["sub"], CLAIMS["email"], [],
+    {"access_token": "a", "refresh_token": "rt-1"},
+  )
+  first.history_id = "100"
+  await integration_repository.upsert(first)
+
+  second = await service.connect(
+    user_id, Provider.GOOGLE, "google-999", "otra@example.com", [],
+    {"access_token": "b", "refresh_token": "rt-2"},
   )
 
-  assert await service.disconnect(saved.id, ObjectId()) is False
-  assert await service.disconnect(saved.id, owner) is True
+  assert await integration_repository.list_by_user(user_id) == [second]
+  assert second.id == first.id  # misma fila
+  assert second.refresh_token == "rt-2"
+  assert second.history_id is None  # el buzón es otro: no heredamos la sincronización
+
+
+async def test_connect_is_per_user(integration_repository):
+  """La misma cuenta de Google en dos usuarios son dos filas."""
+  service = make_service(integration_repository)
+  one, two = ObjectId(), ObjectId()
+  await service.connect(
+    one, Provider.GOOGLE, CLAIMS["sub"], CLAIMS["email"], [], {"access_token": "a"}
+  )
+  await service.connect(
+    two, Provider.GOOGLE, CLAIMS["sub"], CLAIMS["email"], [], {"access_token": "b"}
+  )
+
+  assert len(await integration_repository.list_by_user(one)) == 1
+  assert len(await integration_repository.list_by_user(two)) == 1
+
+
+# desconectar vive ahora en GmailService (para el watch y revoca): ver test_gmail_push.py

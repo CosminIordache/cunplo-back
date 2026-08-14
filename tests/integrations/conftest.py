@@ -13,16 +13,31 @@ class FakeIntegrationRepository:
     self.integrations: dict[ObjectId, Integration] = {}
 
   async def upsert(self, integration: Integration) -> Integration:
-    existing = await self.get_by_account(integration.provider, integration.account_id)
+    existing = await self.get_by_user(integration.user_id, integration.provider)
     if existing:
+      del self.integrations[existing.id]
       integration.id = existing.id
     self.integrations[integration.id] = integration
     return integration
+
+  async def get_by_user(self, user_id: ObjectId, provider: Provider) -> Optional[Integration]:
+    return next(
+      (i for i in self.integrations.values()
+       if i.user_id == user_id and i.provider == provider),
+      None,
+    )
 
   async def get_by_account(self, provider: Provider, account_id: str) -> Optional[Integration]:
     return next(
       (i for i in self.integrations.values()
        if i.provider == provider and i.account_id == account_id),
+      None,
+    )
+
+  async def get_by_email(self, provider: Provider, email: str) -> Optional[Integration]:
+    return next(
+      (i for i in self.integrations.values()
+       if i.provider == provider and i.email == email),
       None,
     )
 

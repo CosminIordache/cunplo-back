@@ -9,15 +9,16 @@ from fastapi.responses import RedirectResponse
 
 from src.container import Container
 from src.domain.integration import Provider
+from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.integration_service import IntegrationService
 from src.infrastructure.driven.google_oauth import GMAIL_SCOPE, google
 from src.presentation.api.schemas.integration import IntegrationOut
 from src.presentation.middleware.auth import CurrentUser
-from src.presentation.utils.to_object_id import ObjectIdParam
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 Service = Annotated[IntegrationService, Depends(Provide[Container.integration_service])]
+Gmail = Annotated[GmailService, Depends(Provide[Container.gmail_service])]
 
 
 @router.get("", response_model=list[IntegrationOut])
@@ -63,8 +64,9 @@ async def google_connect_callback(request: Request, service: Service):
   return RedirectResponse(os.getenv("FRONTEND_REDIRECT", "/"))
 
 
-@router.delete("/{integration_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/google", status_code=status.HTTP_204_NO_CONTENT)
 @inject
-async def disconnect(integration_id: ObjectIdParam, user: CurrentUser, service: Service):
-  if not await service.disconnect(integration_id, user.id):
+async def disconnect(user: CurrentUser, gmail_service: Gmail):
+  """Sin id: el usuario solo tiene una integración por provider."""
+  if not await gmail_service.disconnect(user.id, Provider.GOOGLE):
     raise HTTPException(status.HTTP_404_NOT_FOUND, "integration not found")

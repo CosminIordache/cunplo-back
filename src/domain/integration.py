@@ -24,10 +24,18 @@ class Integration:
   refresh_token: Optional[str]  # cifrado en el repositorio, nunca en claro en Mongo
   access_token: Optional[str] = None
   expires_at: Optional[datetime] = None
+  history_id: Optional[str] = None  # versión del buzón hasta la que hemos procesado
+  watch_expires_at: Optional[datetime] = None  # el watch de Gmail caduca a los 7 días
 
   id: ObjectId = field(default_factory=ObjectId)
   created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
   updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
   def is_expired(self) -> bool:
-    return self.expires_at is None or self.expires_at <= datetime.now(UTC)
+    if self.expires_at is None:
+      return True
+    # Mongo devuelve los datetime sin zona: los tratamos como UTC
+    expires_at = self.expires_at
+    if expires_at.tzinfo is None:
+      expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= datetime.now(UTC)

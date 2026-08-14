@@ -21,7 +21,6 @@ class LoginIn(BaseModel):
   password: str
 
 
-class TokenOut(BaseModel):
-  access_token: str
-  token_type: str = "bearer"
+class SessionOut(BaseModel):
+  """El JWT va en la cookie httponly, no en el cuerpo."""
   user: UserOut

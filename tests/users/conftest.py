@@ -59,30 +59,51 @@ def repository() -> FakeUserRepository:
 
 
 @pytest.fixture
-def overrides(repository) -> dict:
-  return {container.user_repository: repository}
+def integration_repository():
+  # borrar un usuario pasa por las integraciones: sin este doble iría a Mongo
+  from tests.integrations.conftest import FakeIntegrationRepository
+
+  return FakeIntegrationRepository()
+
+
+@pytest.fixture
+def overrides(repository, integration_repository) -> dict:
+  return {
+    container.user_repository: repository,
+    container.integration_repository: integration_repository,
+  }
 
 
 @pytest.fixture
 def created_id(client, payload) -> str:
-  """Registra un usuario y deja su Bearer puesto en el cliente: /users lo exige."""
+  """Registra un usuario; el TestClient guarda su cookie de sesión, que /users exige."""
   body = client.post("/api/v1/auth/register", json=payload).json()
-  client.headers["Authorization"] = f"Bearer {body['access_token']}"
   return body["user"]["id"]
 
 
 @pytest.fixture
 def other_user(client, created_id, payload) -> dict:
-  """Segundo usuario; el cliente conserva el Bearer de `created_id`."""
+  """Segundo usuario. Ojo: registrarlo pisa la cookie de `created_id` en el cliente."""
   other = {**payload, "email": "otro@example.com"}
   return client.post("/api/v1/auth/register", json=other).json()
 
 
 @pytest.fixture
-def other_id(other_user) -> str:
+def other_id(client, other_user, payload) -> str:
+  # Registrar al segundo usuario dejó su cookie puesta: volvemos a la del primero
+  client.post(
+    "/api/v1/auth/login",
+    json={"email": payload["email"], "password": payload["password"]},
+  )
   return other_user["user"]["id"]
 
 
 @pytest.fixture
-def other_token(other_user) -> str:
-  return other_user["access_token"]
+def login_as_other(client, payload):
+  """Cambia la cookie del cliente al segundo usuario."""
+  def login():
+    client.post(
+      "/api/v1/auth/login",
+      json={"email": "otro@example.com", "password": payload["password"]},
+    )
+  return login

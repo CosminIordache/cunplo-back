@@ -29,20 +29,30 @@ class MongoIntegrationRepository:
     self.collection = db["integrations"]
 
   async def upsert(self, integration: Integration) -> Integration:
-    """Reconectar la misma cuenta actualiza los tokens en vez de duplicar."""
+    """Una integración por usuario y provider: reconectar actualiza en vez de duplicar,
+    aunque sea con otra cuenta de Google."""
     integration.updated_at = datetime.now(UTC)
     document = _to_document(integration)
     document.pop("_id")
     document.pop("created_at")
     await self.collection.update_one(
-      {"provider": integration.provider, "account_id": integration.account_id},
+      {"user_id": integration.user_id, "provider": integration.provider},
       {"$set": document, "$setOnInsert": {"_id": integration.id, "created_at": integration.created_at}},
       upsert=True,
     )
     return integration
 
+  async def get_by_user(self, user_id: ObjectId, provider: Provider) -> Optional[Integration]:
+    # user_id en el filtro: nadie lee integraciones de otro
+    doc = await self.collection.find_one({"user_id": user_id, "provider": provider})
+    return _to_integration(doc) if doc else None
+
   async def get_by_account(self, provider: Provider, account_id: str) -> Optional[Integration]:
     doc = await self.collection.find_one({"provider": provider, "account_id": account_id})
+    return _to_integration(doc) if doc else None
+
+  async def get_by_email(self, provider: Provider, email: str) -> Optional[Integration]:
+    doc = await self.collection.find_one({"provider": provider, "email": email})
     return _to_integration(doc) if doc else None
 
   async def list_by_user(self, user_id: ObjectId) -> list[Integration]:
