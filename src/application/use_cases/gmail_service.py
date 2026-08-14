@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 
 from bson import ObjectId
 
@@ -30,6 +30,28 @@ class GmailService:
     )
     return await self.repository.upsert(integration)
 
+  #TODO: Esta funcion se ejecuta en el push notifications del usuario.
+  #      En el futuro crear un cron diario para renovación automatica.
+  async def renew_watch_if_expiring(self, integration: Integration) -> Integration:
+    """Renueva el watch si le queda menos de un día. watch() es idempotente:
+    volver a llamarlo solo extiende la caducidad.
+    """
+    if not self.topic or not integration.watch_expires_at:
+      return integration
+
+    expires_at = integration.watch_expires_at
+    if expires_at.tzinfo is None:
+      expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at - datetime.now(UTC) > timedelta(days=1):
+      return integration
+
+    try:
+      integration = await self.start_watch(integration)
+      logging.info("Gmail watch renewed for %s until %s", integration.email, integration.watch_expires_at)
+    except (ReauthRequired, gmail.GmailError) as error:
+      logging.warning("Could not renew the Gmail watch for %s: %s", integration.email, error)
+    return integration
+
   async def disconnect(self, user_id: ObjectId, provider: Provider = Provider.GOOGLE) -> bool:
     """Corta el push y revoca el acceso antes de borrar: si no, Google sigue publicando.
     Una integración por usuario y provider, así que no hace falta el id."""
@@ -37,8 +59,6 @@ class GmailService:
     if not integration:
       return False
 
-    # por separado: si parar el watch falla, revocar tiene que intentarse igual,
-    # y revocar el refresh_token mata el watch aunque el stop no haya llegado
     try:
       await gmail.stop_watch(await self.integrations.access_token_for(integration))
     except (ReauthRequired, gmail.GmailError) as error:
@@ -58,6 +78,7 @@ class GmailService:
       logging.warning("Notification for %s: account not connected, ignored", email)
       return []  # cuenta desconectada: la notificación llega igual un rato
 
+    integration = await self.renew_watch_if_expiring(integration)
     token = await self.integrations.access_token_for(integration)
     start = integration.history_id
     if not start:

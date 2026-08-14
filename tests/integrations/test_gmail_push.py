@@ -20,13 +20,14 @@ def service(integration_repository, monkeypatch):
   return GmailService(integration_repository, integrations, topic="projects/x/topics/y")
 
 
-async def _connect(repo, history_id=None):
+async def _connect(repo, history_id=None, watch_expires_at=None):
   from src.domain.integration import Integration
 
   integration = Integration(
     user_id=ObjectId(), provider=Provider.GOOGLE, account_id="g-1", email=EMAIL,
     scopes=["gmail.readonly"], refresh_token="rt", access_token="at",
     expires_at=datetime.now(UTC) + timedelta(hours=1), history_id=history_id,
+    watch_expires_at=watch_expires_at,
   )
   return await repo.upsert(integration)
 
@@ -111,6 +112,75 @@ async def test_start_watch_saves_marker_and_expiry(service, integration_reposito
   saved = await service.start_watch(integration)
   assert saved.history_id == "42"
   assert saved.watch_expires_at > datetime.now(UTC)
+
+
+async def _no_history(monkeypatch):
+  """La notificación no debe traer mensajes: aquí solo miramos el watch."""
+  async def new_message_ids(token, start):
+    return [], start
+
+  monkeypatch.setattr(gmail, "new_message_ids", new_message_ids)
+
+
+async def test_notification_renews_watch_about_to_expire(service, integration_repository, monkeypatch):
+  await _connect(
+    integration_repository, history_id="100",
+    watch_expires_at=datetime.now(UTC) + timedelta(hours=2),
+  )
+  await _no_history(monkeypatch)
+  renewed = int((datetime.now(UTC) + timedelta(days=7)).timestamp() * 1000)
+  called = {}
+
+  async def watch(token, topic):
+    called["topic"] = topic
+    return {"historyId": "100", "expiration": str(renewed)}
+
+  monkeypatch.setattr(gmail, "watch", watch)
+
+  await service.process_notification(EMAIL, "100")
+
+  assert called["topic"] == "projects/x/topics/y"
+  stored = await integration_repository.get_by_email(Provider.GOOGLE, EMAIL)
+  assert stored.watch_expires_at > datetime.now(UTC) + timedelta(days=6)
+
+
+async def test_notification_does_not_renew_a_fresh_watch(service, integration_repository, monkeypatch):
+  await _connect(
+    integration_repository, history_id="100",
+    watch_expires_at=datetime.now(UTC) + timedelta(days=5),
+  )
+  await _no_history(monkeypatch)
+
+  async def boom(*a, **k):
+    raise AssertionError("no debería renovar un watch aún vigente")
+
+  monkeypatch.setattr(gmail, "watch", boom)
+
+  await service.process_notification(EMAIL, "100")
+
+
+async def test_failed_renewal_does_not_break_the_notification(service, integration_repository, monkeypatch):
+  """El watch vigente todavía sirve: un fallo al renovar no puede tumbar el push."""
+  await _connect(
+    integration_repository, history_id="100",
+    watch_expires_at=datetime.now(UTC) + timedelta(hours=2),
+  )
+
+  async def boom(token, topic):
+    raise gmail.GmailError("Gmail API 500")
+
+  async def new_message_ids(token, start):
+    return ["m1"], "160"
+
+  async def get_message(token, message_id):
+    return {"id": message_id}
+
+  monkeypatch.setattr(gmail, "watch", boom)
+  monkeypatch.setattr(gmail, "new_message_ids", new_message_ids)
+  monkeypatch.setattr(gmail, "get_message", get_message)
+
+  messages = await service.process_notification(EMAIL, "160")
+  assert [m["id"] for m in messages] == ["m1"]  # el correo se procesa igual
 
 
 async def test_disconnect_stops_watch_and_revokes(service, integration_repository, monkeypatch):
