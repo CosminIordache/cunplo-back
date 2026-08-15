@@ -7,14 +7,11 @@ from bson import ObjectId
 
 
 class Provider(StrEnum):
-  """Proveedores OAuth2. OUTLOOK encaja aquí tal cual cuando toque."""
-
   GOOGLE = "google"
 
 
 @dataclass
 class Integration:
-  """Cuenta externa conectada por un usuario. Un usuario puede tener varias."""
 
   user_id: ObjectId
   provider: Provider
@@ -34,7 +31,6 @@ class Integration:
   def is_expired(self) -> bool:
     if self.expires_at is None:
       return True
-    # Mongo devuelve los datetime sin zona: los tratamos como UTC
     expires_at = self.expires_at
     if expires_at.tzinfo is None:
       expires_at = expires_at.replace(tzinfo=UTC)

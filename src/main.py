@@ -19,7 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.container import Container
-from src.presentation.api.router import auth, integration, user, webhook
+from src.infrastructure.driving import gmail_webhook
+from src.presentation.api.router import auth, contact, integration, user
 
 container = Container()
 
@@ -37,7 +38,8 @@ app.container = container
 app.include_router(user.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(integration.router, prefix="/api/v1")
-app.include_router(webhook.router, prefix="/api/v1")
+app.include_router(gmail_webhook.router, prefix="/api/v1")
+app.include_router(contact.router, prefix="/api/v1")
 
 # Sesión firmada (itsdangerous): la necesita el flujo OAuth de Authlib para el state
 app.add_middleware(

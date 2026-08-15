@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "arq>=0.28.0",
     "authlib>=1.7.2",
     "dependency-injector>=4.49.1",
     "dotenv>=0.9.9",

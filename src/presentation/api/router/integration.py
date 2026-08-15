@@ -11,7 +11,7 @@ from src.container import Container
 from src.domain.integration import Provider
 from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.integration_service import IntegrationService
-from src.infrastructure.driven.google_oauth import GMAIL_SCOPE, google
+from src.infrastructure.external_services.google_oauth import GMAIL_SCOPE, google
 from src.presentation.api.schemas.integration import IntegrationOut
 from src.presentation.middleware.auth import CurrentUser
 

@@ -6,7 +6,7 @@ from bson import ObjectId
 from src.domain.integration import Integration, Provider
 from src.application.ports.integration_repository import IntegrationRepository
 from src.application.use_cases.integration_service import IntegrationService, ReauthRequired
-from src.infrastructure.driven import gmail, google_oauth
+from src.infrastructure.external_services import gmail, google_oauth
 
 
 class GmailService:
@@ -98,10 +98,7 @@ class GmailService:
 
     messages = [await gmail.get_message(token, message_id) for message_id in ids]
     for message in messages:
-      logging.info(
-        "New mail for %s | from: %s | subject: %s",
-        email, message.get("sender", "?"), message.get("subject", "(no subject)"),
-      )
+      logging.info("New mail for %s (user %s) | %s", email, integration.user_id, message)
 
     integration.history_id = marker
     await self.repository.upsert(integration)

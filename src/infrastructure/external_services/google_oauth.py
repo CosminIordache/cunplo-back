@@ -1,4 +1,3 @@
-"""Cliente OAuth2 de Google. Authlib descubre endpoints y valida el id_token."""
 import os
 
 import httpx

@@ -1,7 +1,6 @@
-"""Cliente de Gmail (REST v1): leer mensajes, seguir el historial y activar el push."""
 import base64
 from typing import Optional
-
+import logging
 import httpx
 
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -46,8 +45,10 @@ def _to_message(raw: dict) -> dict:
     "thread_id": raw.get("threadId"),
     "subject": _header(payload, "subject"),
     "sender": _header(payload, "from"),
-    "date": _header(payload, "date"),
-    "snippet": raw.get("snippet", ""),
+    "to": _header(payload, "to"),
+    "cc": _header(payload, "cc"),
+    # el 'Date' de la cabecera lo pone el remitente; este lo pone Gmail
+    "internal_date": int(raw["internalDate"]),
     "body": _body(payload),
   }
 
@@ -59,7 +60,8 @@ def _auth(access_token: str) -> dict:
 async def get_message(access_token: str, message_id: str) -> dict:
   async with httpx.AsyncClient(timeout=30) as http:
     response = await http.get(f"{API}/messages/{message_id}", headers=_auth(access_token))
-    return _to_message(_check(response).json())
+    raw = _check(response).json()
+    return _to_message(raw)
 
 
 async def new_message_ids(access_token: str, start_history_id: str) -> tuple[list[str], str]:
@@ -68,7 +70,11 @@ async def new_message_ids(access_token: str, start_history_id: str) -> tuple[lis
     response = await http.get(
       f"{API}/history",
       headers=_auth(access_token),
-      params={"startHistoryId": start_history_id, "historyTypes": "messageAdded"},
+      params={
+        "startHistoryId": start_history_id,
+        "historyTypes": "messageAdded",
+        "labelId": "INBOX",
+      },
     )
     if response.status_code == 404:
       raise HistoryTooOld

@@ -154,7 +154,7 @@ async def test_refresh_asks_for_the_gmail_scope(monkeypatch):
   """Dos fallos vistos en producción: url= duplicada y un refresh sin el scope de Gmail
   (Google devolvía un token de solo login y Gmail respondía 403)."""
   from authlib.integrations.httpx_client import AsyncOAuth2Client
-  from src.infrastructure.driven import google_oauth
+  from src.infrastructure.external_services import google_oauth
 
   seen = {}
 

@@ -52,9 +52,24 @@ class FakeIntegrationRepository:
     return True
 
 
+class FakeQueue:
+  """Solo apunta lo encolado: el worker se prueba aparte."""
+
+  def __init__(self):
+    self.jobs: list[tuple] = []
+
+  async def enqueue_job(self, name: str, *args):
+    self.jobs.append((name, *args))
+
+
 @pytest.fixture
 def repository() -> FakeUserRepository:
   return FakeUserRepository()
+
+
+@pytest.fixture
+def queue() -> FakeQueue:
+  return FakeQueue()
 
 
 @pytest.fixture
@@ -63,8 +78,9 @@ def integration_repository() -> FakeIntegrationRepository:
 
 
 @pytest.fixture
-def overrides(repository, integration_repository) -> dict:
+def overrides(repository, integration_repository, queue) -> dict:
   return {
     container.user_repository: repository,
     container.integration_repository: integration_repository,
+    container.queue: queue,
   }

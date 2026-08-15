@@ -86,3 +86,6 @@ class IntegrationService:
 
   async def list_by_user(self, user_id: ObjectId) -> list[Integration]:
     return await self.repository.list_by_user(user_id)
+
+  async def get_by_email(self, provider: Provider, email: str) -> Optional[Integration]:
+    return await self.repository.get_by_email(provider, email)

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, UTC
 from bson import ObjectId
 
 from src.domain.integration import Integration, Provider
-from src.infrastructure.driven import gmail, google_oauth
+from src.infrastructure.external_services import gmail, google_oauth
 
 
 def test_requires_token(client):

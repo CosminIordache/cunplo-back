@@ -1,5 +1,5 @@
 from src.domain.user import User
-from src.infrastructure.driven.mongo_user_repository import _to_document, _to_user
+from src.infrastructure.driven.mongo.mongo_user_repository import _to_document, _to_user
 from tests.users.conftest import PAYLOAD
 
 

@@ -10,8 +10,8 @@ from dependency_injector.wiring import inject, Provide
 
 from src.container import Container
 from src.domain.integration import Provider
-from src.infrastructure.driven.gmail import GmailError
-from src.infrastructure.driven.google_oauth import GMAIL_SCOPE, google
+from src.infrastructure.external_services.gmail import GmailError
+from src.infrastructure.external_services.google_oauth import GMAIL_SCOPE, google
 from src.domain.user import User
 from src.application.use_cases.auth_service import (
   AuthService,

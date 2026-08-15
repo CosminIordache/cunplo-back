@@ -1,0 +1,10 @@
+from typing import Protocol
+from bson import ObjectId
+
+from src.domain.message import Message
+
+
+class MessageRepository(Protocol):
+  async def upsert(self, message: Message) -> Message: ...
+  async def list_by_thread_id_user_id(self, user_id: ObjectId, thread_id: str) -> list[Message]: ...
+  async def delete(self, message_id: ObjectId, user_id: ObjectId) -> bool: ...

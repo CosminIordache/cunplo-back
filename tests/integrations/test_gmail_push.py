@@ -8,7 +8,10 @@ from bson import ObjectId
 
 from src.domain.integration import Provider
 from src.application.use_cases.gmail_service import GmailService
-from src.infrastructure.driven import gmail, google_oauth
+from src.infrastructure.driven.redis.functions.process_gmail_notification import (
+  process_gmail_notification,
+)
+from src.infrastructure.external_services import gmail, google_oauth
 from tests.integrations.test_integration_service import make_service
 
 EMAIL = "ada@example.com"
@@ -236,16 +239,9 @@ async def test_disconnect_revokes_even_if_stop_watch_fails(service, integration_
   assert await integration_repository.get_by_email(Provider.GOOGLE, EMAIL) is None
 
 
-def test_webhook_decodes_pubsub_envelope(client, monkeypatch):
-  """El endpoint driving: Pub/Sub manda el payload en base64."""
+def test_webhook_decodes_pubsub_envelope(client, queue, monkeypatch):
+  """El endpoint driving: Pub/Sub manda el payload en base64 y nosotros encolamos."""
   monkeypatch.setenv("PUBSUB_TOKEN", "secreto")
-  seen = {}
-
-  async def process(self, email, history_id):
-    seen.update(email=email, history_id=history_id)
-    return []
-
-  monkeypatch.setattr(GmailService, "process_notification", process)
 
   data = base64.b64encode(
     json.dumps({"emailAddress": EMAIL, "historyId": 777}).encode()
@@ -255,7 +251,56 @@ def test_webhook_decodes_pubsub_envelope(client, monkeypatch):
   )
 
   assert response.status_code == 204
+  # el historyId viaja como string: arq serializa a JSON y Gmail lo manda como número
+  assert queue.jobs == [("process_gmail_notification", EMAIL, "777")]
+
+
+async def test_worker_job_reaches_the_service():
+  """El otro lado de la cola: lo que el worker desencola acaba en el servicio."""
+  seen = {}
+
+  class FakeGmailService:
+    async def process_notification(self, email, history_id):
+      seen.update(email=email, history_id=history_id)
+      return []
+
+  await process_gmail_notification({"gmail_service": FakeGmailService()}, EMAIL, "777")
+
   assert seen == {"email": EMAIL, "history_id": "777"}
+
+
+async def test_worker_job_saves_the_messages(integration_repository):
+  """El correo entero acaba en db, con el dueño que la cola no trae."""
+  integration = await _connect(integration_repository, history_id="100")
+  saved = []
+
+  class FakeGmailService:
+    async def process_notification(self, email, history_id):
+      return [{
+        "id": "m1", "thread_id": "t1", "subject": "hola", "sender": "ada@example.com",
+        "to": "bob@example.com", "cc": "", "body": "texto", "internal_date": 1700000000000,
+      }]
+
+  class FakeMessageService:
+    async def upsert(self, message):
+      saved.append(message)
+      return message
+
+  ctx = {
+    "gmail_service": FakeGmailService(),
+    "integration_service": make_service(integration_repository),
+    "message_service": FakeMessageService(),
+  }
+  await process_gmail_notification(ctx, EMAIL, "160")
+
+  assert len(saved) == 1
+  message = saved[0]
+  assert message.provider_id == "m1"
+  assert message.subject == "hola"
+  assert message.body == "texto"
+  assert message.user_id == integration.user_id  # el dueño sale de la integración
+  assert message.integration_id == integration.id
+  assert message.cc is None  # sin copia: ausente, no cadena vacía
 
 
 def test_webhook_rejects_wrong_token(client, monkeypatch):
