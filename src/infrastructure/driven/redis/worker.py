@@ -43,6 +43,10 @@ async def startup(ctx) -> None:
   ctx["gmail_service"] = await container.gmail_service()
   ctx["integration_service"] = await container.integration_service()
   ctx["message_service"] = await container.message_service()
+  ctx["task_service"] = await container.task_service()
+  ctx["contact_service"] = await container.contact_service()
+  # sin Resource async detrás: Factory ya devuelve la instancia, no hay que esperarla
+  ctx["agent_service"] = container.agent_service()
   logging.info("ARQ worker started!")
 
 

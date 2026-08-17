@@ -96,9 +96,26 @@ class GmailService:
       await self.repository.upsert(integration)
       return []
 
-    messages = [await gmail.get_message(token, message_id) for message_id in ids]
-    for message in messages:
-      logging.info("New mail for %s (user %s) | %s", email, integration.user_id, message)
+    messages = []
+    for message_id in ids:
+      try:
+        message = await gmail.get_message(token, message_id)
+      except gmail.MessageNotFound:
+        # borrado o movido a spam desde que el historial lo anunció: no corta el resto
+        logging.info("Message %s no longer in %s, skipped", message_id, email)
+        continue
+      # el borrador se indexa mientras se escribe y desaparece al enviar, con otro id:
+      # guardarlo deja un mensaje fantasma duplicado en el hilo
+      if "DRAFT" in message["labels"]:
+        logging.info("Message %s is a draft, skipped", message_id)
+        continue
+      messages.append(message)
+      logging.info(
+        "New mail from %s for %s (user %s)",
+        message.get("sender"),
+        email,
+        integration.user_id,
+      )
 
     integration.history_id = marker
     await self.repository.upsert(integration)

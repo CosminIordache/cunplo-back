@@ -29,12 +29,24 @@ class MongoTaskRepository:
     document = _to_document(task)
     document.pop("_id")
     document.pop("created_at")
-    await self.collection.update_one(
+    # Los contactos se acumulan en vez de sustituirse: el agente solo mira el correo
+    # nuevo, y los de correos anteriores del hilo ya no vuelven a salir.
+    contact_ids = document.pop("contact_ids")
+    doc = await self.collection.find_one_and_update(
       {"user_id": task.user_id, "thread_id": task.thread_id},
-      {"$set": document, "$setOnInsert": {"_id": task.id, "created_at": task.created_at}},
+      {
+        "$set": document,
+        "$addToSet": {"contact_ids": {"$each": contact_ids}},
+        "$setOnInsert": {"_id": task.id, "created_at": task.created_at},
+      },
       upsert=True,
+      return_document=True,
     )
-    return task
+    return _to_task(doc)
+
+  async def get(self, task_id: ObjectId, user_id: ObjectId) -> Optional[Task]:
+    doc = await self.collection.find_one({"_id": task_id, "user_id": user_id})
+    return _to_task(doc) if doc else None
 
   async def get_by_thread(self, user_id: ObjectId, thread_id: str) -> Optional[Task]:
     doc = await self.collection.find_one({"user_id": user_id, "thread_id": thread_id})

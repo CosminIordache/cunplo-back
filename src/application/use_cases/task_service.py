@@ -1,16 +1,22 @@
+import logging
 from typing import Optional
 from bson import ObjectId
 
 from src.domain.task import Task, Status
 from src.application.ports.task_repository import TaskRepository
+from src.application.use_cases.message_service import MessageService
 
 
 class TaskService:
-  def __init__(self, repository: TaskRepository):
+  def __init__(self, repository: TaskRepository, messages: MessageService):
     self.repository = repository
+    self.messages = messages
 
   async def upsert(self, task: Task) -> Task:
     return await self.repository.upsert(task)
+
+  async def get(self, task_id: ObjectId, user_id: ObjectId) -> Optional[Task]:
+    return await self.repository.get(task_id, user_id)
 
   async def get_by_thread(self, user_id: ObjectId, thread_id: str) -> Optional[Task]:
     return await self.repository.get_by_thread(user_id, thread_id)
@@ -22,4 +28,13 @@ class TaskService:
     return await self.repository.update(task_id, user_id, changes)
 
   async def delete(self, task_id: ObjectId, user_id: ObjectId) -> bool:
+    """Borrar la tarea se lleva los correos del hilo: sin tarea no hay por qué guardarlos."""
+    task = await self.repository.get(task_id, user_id)
+    if not task:
+      return False
+
+    deleted = await self.messages.delete_by_thread(user_id, task.thread_id)
+    logging.info(
+      "Task %s deleted with %s messages of thread %s", task_id, deleted, task.thread_id
+    )
     return await self.repository.delete(task_id, user_id)

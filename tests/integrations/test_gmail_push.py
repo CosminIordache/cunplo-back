@@ -7,6 +7,9 @@ import pytest
 from bson import ObjectId
 
 from src.domain.integration import Provider
+from src.domain.message import Message
+from src.domain.task import Status
+from src.application.use_cases.agent_service import ExtractedTask
 from src.application.use_cases.gmail_service import GmailService
 from src.infrastructure.driven.redis.functions.process_gmail_notification import (
   process_gmail_notification,
@@ -57,7 +60,7 @@ async def test_notification_returns_new_messages(service, integration_repository
     return ["m1", "m2"], "160"
 
   async def get_message(token, message_id):
-    return {"id": message_id, "subject": f"asunto {message_id}"}
+    return {"id": message_id, "labels": ["INBOX"], "subject": f"asunto {message_id}"}
 
   monkeypatch.setattr(gmail, "new_message_ids", new_message_ids)
   monkeypatch.setattr(gmail, "get_message", get_message)
@@ -67,6 +70,30 @@ async def test_notification_returns_new_messages(service, integration_repository
 
   stored = await integration_repository.get_by_email(Provider.GOOGLE, EMAIL)
   assert stored.history_id == "160"  # marcador avanzado
+
+
+async def test_deleted_message_does_not_break_the_batch(
+  service, integration_repository, monkeypatch
+):
+  """Gmail anuncia un correo y lo borran antes de que lo pidamos: el resto sigue."""
+  await _connect(integration_repository, history_id="100")
+
+  async def new_message_ids(token, start):
+    return ["m1", "borrado", "m2"], "160"
+
+  async def get_message(token, message_id):
+    if message_id == "borrado":
+      raise gmail.MessageNotFound(message_id)
+    return {"id": message_id, "labels": ["INBOX"], "subject": f"asunto {message_id}"}
+
+  monkeypatch.setattr(gmail, "new_message_ids", new_message_ids)
+  monkeypatch.setattr(gmail, "get_message", get_message)
+
+  messages = await service.process_notification(EMAIL, "160")
+
+  assert [m["id"] for m in messages] == ["m1", "m2"]
+  stored = await integration_repository.get_by_email(Provider.GOOGLE, EMAIL)
+  assert stored.history_id == "160"  # el marcador avanza igual
 
 
 async def test_history_too_old_resyncs(service, integration_repository, monkeypatch):
@@ -176,7 +203,7 @@ async def test_failed_renewal_does_not_break_the_notification(service, integrati
     return ["m1"], "160"
 
   async def get_message(token, message_id):
-    return {"id": message_id}
+    return {"id": message_id, "labels": ["INBOX"]}
 
   monkeypatch.setattr(gmail, "watch", boom)
   monkeypatch.setattr(gmail, "new_message_ids", new_message_ids)
@@ -272,7 +299,7 @@ async def test_worker_job_reaches_the_service():
 async def test_worker_job_saves_the_messages(integration_repository):
   """El correo entero acaba en db, con el dueño que la cola no trae."""
   integration = await _connect(integration_repository, history_id="100")
-  saved = []
+  saved, tasks = [], []
 
   class FakeGmailService:
     async def process_notification(self, email, history_id):
@@ -286,10 +313,25 @@ async def test_worker_job_saves_the_messages(integration_repository):
       saved.append(message)
       return message
 
+    async def list_by_thread_id_user_id(self, user_id, thread_id):
+      return []
+
+  class FakeAgentService:
+    async def run_tasks(self, owner_email, thread_messages, new_message):
+      return ExtractedTask(title="responder a ada", status=Status.TODO, contacts=[])
+
+  class FakeTaskService:
+    async def upsert(self, task):
+      tasks.append(task)
+      return task
+
   ctx = {
     "gmail_service": FakeGmailService(),
     "integration_service": make_service(integration_repository),
     "message_service": FakeMessageService(),
+    "agent_service": FakeAgentService(),
+    "task_service": FakeTaskService(),
+    "contact_service": _FakeContactService(),
   }
   await process_gmail_notification(ctx, EMAIL, "160")
 
@@ -301,9 +343,130 @@ async def test_worker_job_saves_the_messages(integration_repository):
   assert message.user_id == integration.user_id  # el dueño sale de la integración
   assert message.integration_id == integration.id
   assert message.cc is None  # sin copia: ausente, no cadena vacía
+  assert tasks[0].thread_id == "t1"
+  assert tasks[0].title == "responder a ada"
+
+
+class _FakeContactService:
+  def __init__(self):
+    self.created = []
+
+  async def get_by_email(self, user_id, email):
+    return next((c for c in self.created if c.email == email), None)
+
+  async def create(self, contact):
+    self.created.append(contact)
+    return contact
+
+
+async def test_worker_job_never_saves_the_owner_as_contact(integration_repository):
+  """Su propia cuenta no acaba como contacto, la devuelva el agente o no."""
+  from src.application.use_cases.agent_service import ExtractedContact
+
+  await _connect(integration_repository, history_id="100")
+  contacts, tasks = _FakeContactService(), []
+
+  class FakeGmailService:
+    async def process_notification(self, email, history_id):
+      return [{
+        "id": "m1", "thread_id": "t1", "subject": "hola", "sender": "laura@acme.com",
+        "to": EMAIL, "cc": "", "body": "texto", "internal_date": 1700000000000,
+      }]
+
+  class FakeMessageService:
+    async def upsert(self, message):
+      return message
+
+    async def list_by_thread_id_user_id(self, user_id, thread_id):
+      return []
+
+  class FakeAgentService:
+    async def run_tasks(self, owner_email, thread_messages, new_message):
+      return ExtractedTask(
+        title="responder", status=Status.TODO,
+        contacts=[
+          ExtractedContact(email=EMAIL.upper()),  # él mismo, y en mayúsculas
+          ExtractedContact(email="laura@acme.com", name="Laura"),
+        ],
+      )
+
+  class FakeTaskService:
+    async def upsert(self, task):
+      tasks.append(task)
+      return task
+
+  ctx = {
+    "gmail_service": FakeGmailService(),
+    "integration_service": make_service(integration_repository),
+    "message_service": FakeMessageService(),
+    "agent_service": FakeAgentService(),
+    "contact_service": contacts,
+    "task_service": FakeTaskService(),
+  }
+  await process_gmail_notification(ctx, EMAIL, "160")
+
+  assert [c.email for c in contacts.created] == ["laura@acme.com"]
+  assert len(tasks[0].contact_ids) == 1
+
+
+_MESSAGE = Message(
+  user_id=ObjectId(), integration_id=ObjectId(), provider_id="m1", thread_id="t1",
+  sender="ada@example.com", to="bob@example.com", subject="presupuesto",
+  body="¿me pasas precio?", internal_date=1600000000000,
+)
+
+
+async def test_worker_job_skips_mail_without_task(integration_repository):
+  """Sin tarea no se guarda, aunque el hilo ya tenga otros correos: la publicidad
+  que el cliente cuela en un hilo que sí es tarea tampoco entra."""
+  await _connect(integration_repository, history_id="100")
+  saved = []
+
+  class FakeGmailService:
+    async def process_notification(self, email, history_id):
+      return [{
+        "id": "m2", "thread_id": "t1", "subject": "publicidad", "sender": "ada@example.com",
+        "to": "bob@example.com", "cc": "", "body": "mira mi oferta", "internal_date": 1700000000000,
+      }]
+
+  class FakeMessageService:
+    async def upsert(self, message):
+      saved.append(message)
+      return message
+
+    async def list_by_thread_id_user_id(self, user_id, thread_id):
+      return [_MESSAGE]  # el hilo ya es una tarea
+
+  class FakeAgentService:
+    async def run_tasks(self, owner_email, thread_messages, new_message):
+      return None
+
+  ctx = {
+    "gmail_service": FakeGmailService(),
+    "integration_service": make_service(integration_repository),
+    "message_service": FakeMessageService(),
+    "agent_service": FakeAgentService(),
+  }
+  await process_gmail_notification(ctx, EMAIL, "160")
+
+  assert saved == []
 
 
 def test_webhook_rejects_wrong_token(client, monkeypatch):
   monkeypatch.setenv("PUBSUB_TOKEN", "secreto")
   response = client.post("/api/v1/webhooks/gmail?token=malo", json={"message": {}})
   assert response.status_code == 403
+
+
+async def test_drafts_are_not_stored(monkeypatch):
+  """El borrador se indexa mientras se escribe y desaparece al enviar: no debe guardarse."""
+  from src.infrastructure.external_services import gmail
+  from src.application.use_cases.gmail_service import GmailService
+
+  raw = {
+    "id": "draft1",
+    "labelIds": ["DRAFT"],
+    "internalDate": "1",
+    "payload": {"headers": [], "mimeType": "text/plain", "body": {}},
+  }
+  assert gmail._to_message(raw)["labels"] == ["DRAFT"]

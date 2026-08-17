@@ -14,6 +14,10 @@ class GmailError(Exception):
   """Gmail respondió con un error. Envuelve el HTTPStatusError de httpx."""
 
 
+class MessageNotFound(GmailError):
+  """El correo ya no está: borrado o movido entre que el historial lo anunció y lo pedimos."""
+
+
 def _check(response: httpx.Response) -> httpx.Response:
   """Traduce el error crudo de httpx a uno nuestro, con el detalle de Gmail."""
   if response.is_error:
@@ -42,6 +46,7 @@ def _to_message(raw: dict) -> dict:
   payload = raw.get("payload", {})
   return {
     "id": raw["id"],
+    "labels": raw.get("labelIds", []),
     "thread_id": raw.get("threadId"),
     "subject": _header(payload, "subject"),
     "sender": _header(payload, "from"),
@@ -60,6 +65,8 @@ def _auth(access_token: str) -> dict:
 async def get_message(access_token: str, message_id: str) -> dict:
   async with httpx.AsyncClient(timeout=30) as http:
     response = await http.get(f"{API}/messages/{message_id}", headers=_auth(access_token))
+    if response.status_code == 404:
+      raise MessageNotFound(message_id)
     raw = _check(response).json()
     return _to_message(raw)
 

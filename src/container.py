@@ -3,6 +3,7 @@ import os
 from dependency_injector import containers, providers
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from src.application.use_cases.agent_service import AgentService
 from src.application.use_cases.auth_service import AuthService
 from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
@@ -58,6 +59,8 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.api.router.auth",
       "src.presentation.api.router.integration",
       "src.presentation.api.router.contact",
+      "src.presentation.api.router.task",
+      "src.presentation.api.router.message",
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
@@ -85,10 +88,14 @@ class Container(containers.DeclarativeContainer):
   message_service = providers.Factory(MessageService, repository=message_repository)
 
   task_repository = providers.Factory(MongoTaskRepository, db=db)
-  task_service = providers.Factory(TaskService, repository=task_repository)
+  task_service = providers.Factory(
+    TaskService, repository=task_repository, messages=message_service
+  )
 
   contact_repository = providers.Factory(MongoContactRepository, db=db)
   contact_service = providers.Factory(ContactService, repository=contact_repository)
+
+  agent_service = providers.Factory(AgentService)
 
   config.pubsub_topic.from_env("PUBSUB_TOPIC", "")
   gmail_service = providers.Factory(
