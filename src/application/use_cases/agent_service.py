@@ -119,5 +119,5 @@ class AgentService:
   def _format(self, message: AgentEmailMessage) -> str:
     return (
       f"From: {message.sender}\nTo: {message.to}\nCc: {message.cc}\n"
-      f"Subject: {message.subject}\n\n{message.body}"
+      f"Subject: {message.subject}\n\nMessage body: {message.body}"
     )
