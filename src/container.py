@@ -68,8 +68,8 @@ class Container(containers.DeclarativeContainer):
   )
 
   config = providers.Configuration()
-  config.mongo_uri.from_env("MONGO_URI", "mongodb://localhost:27017")
-  config.mongo_db.from_env("MONGO_DB", "cunplo")
+  config.mongo_uri.from_env("MONGO_URI")
+  config.mongo_db.from_env("MONGO_DB")
 
   client = providers.Resource(mongo_client, config.mongo_uri, config.mongo_db)
   queue = providers.Resource(redis_pool)
