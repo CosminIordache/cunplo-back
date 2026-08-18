@@ -20,7 +20,7 @@ from src.application.use_cases.auth_service import (
 )
 from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.integration_service import IntegrationService
-from src.infrastructure.utils.security import COOKIE_NAME, set_session_cookie
+from src.infrastructure.utils.security import COOKIE_DOMAIN, COOKIE_NAME, set_session_cookie
 from src.presentation.api.schemas.auth import LoginIn, RegisterIn, SessionOut
 from src.presentation.api.schemas.user import UserOut
 from src.presentation.middleware.auth import CurrentUser
@@ -60,7 +60,7 @@ async def login(payload: LoginIn, service: Service, response: Response):
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(response: Response):
-  response.delete_cookie(COOKIE_NAME, path="/")
+  response.delete_cookie(COOKIE_NAME, path="/", domain=COOKIE_DOMAIN)
 
 
 @router.get("/me", response_model=UserOut)

@@ -17,6 +17,10 @@ COOKIE_NAME = "access_token"
 # En dev el front va por el proxy de Vite, así que la cookie es same-site y no
 # necesita HTTPS. COOKIE_SECURE=1 en producción.
 COOKIE_SECURE = os.getenv("COOKIE_SECURE") == "1"
+# Sin domain la cookie es host-only y solo vuelve a api.cunplo.com; el front vive en
+# app.cunplo.com y nunca la manda. COOKIE_DOMAIN=.cunplo.com en producción.
+# ponytail: vacío en dev (localhost no admite dominio con punto), None lo omite.
+COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN") or None
 
 if not JWT_SECRET:
   raise RuntimeError("JWT_SECRET don't exist (Create it in the .ENV))")
@@ -60,6 +64,7 @@ def set_session_cookie(response, token: str) -> None:
     secure=COOKIE_SECURE,
     samesite="lax",
     path="/",
+    domain=COOKIE_DOMAIN,
   )
 
 
