@@ -17,6 +17,7 @@ from fastapi import FastAPI
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from src.container import Container
 from src.infrastructure.driving import gmail_webhook
@@ -47,6 +48,12 @@ app.include_router(message.router, prefix="/api/v1")
 app.add_middleware(
     SessionMiddleware, secret_key=os.getenv("SESSION_SECRET")
 )
+
+# Railway corta el TLS en su proxy y nos habla en HTTP: sin esto request.url_for()
+# devuelve http:// y Google rechaza el redirect_uri.
+# ponytail: trusted_hosts="*" confía en cualquier X-Forwarded-Proto; en Railway el
+# contenedor solo es alcanzable vía su proxy. Restringir si se expone el puerto.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 app.add_middleware(
     CORSMiddleware,
