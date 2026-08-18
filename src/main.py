@@ -45,13 +45,13 @@ app.include_router(message.router, prefix="/api/v1")
 
 # Sesión firmada (itsdangerous): la necesita el flujo OAuth de Authlib para el state
 app.add_middleware(
-    SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "dev-secret-change-me")
+    SessionMiddleware, secret_key=os.getenv("SESSION_SECRET")
 )
 
 app.add_middleware(
     CORSMiddleware,
     # Con allow_credentials no vale "*": el navegador exige el origen exacto
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=os.getenv("CORS_ORIGINS").split(","),
     allow_credentials=True,
     allow_methods=["GET", "POST","DELETE", "PUT", "PATCH"],
     allow_headers=[
