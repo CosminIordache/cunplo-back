@@ -1,4 +1,4 @@
-import logging
+import logfire
 from typing import Optional
 from bson import ObjectId
 
@@ -34,7 +34,10 @@ class TaskService:
       return False
 
     deleted = await self.messages.delete_by_thread(user_id, task.thread_id)
-    logging.info(
-      "Task %s deleted with %s messages of thread %s", task_id, deleted, task.thread_id
+    logfire.info(
+      "Task {task_id} deleted with {deleted} messages of thread {thread_id}",
+      task_id=task_id,
+      deleted=deleted,
+      thread_id=task.thread_id,
     )
     return await self.repository.delete(task_id, user_id)

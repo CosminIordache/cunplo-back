@@ -1,4 +1,4 @@
-import logging
+import logfire
 from datetime import datetime, timedelta, UTC
 
 from bson import ObjectId
@@ -47,9 +47,9 @@ class GmailService:
 
     try:
       integration = await self.start_watch(integration)
-      logging.info("Gmail watch renewed for %s until %s", integration.email, integration.watch_expires_at)
+      logfire.info("Gmail watch renewed for {email} until {expires_at}", email=integration.email, expires_at=integration.watch_expires_at)
     except (ReauthRequired, gmail.GmailError) as error:
-      logging.warning("Could not renew the Gmail watch for %s: %s", integration.email, error)
+      logfire.warning("Could not renew the Gmail watch for {email}: {error}", email=integration.email, error=error)
     return integration
 
   async def disconnect(self, user_id: ObjectId, provider: Provider = Provider.GOOGLE) -> bool:
@@ -62,12 +62,12 @@ class GmailService:
     try:
       await gmail.stop_watch(await self.integrations.access_token_for(integration))
     except (ReauthRequired, gmail.GmailError) as error:
-      logging.warning("Could not stop the Gmail watch for %s: %s", integration.email, error)
+      logfire.warning("Could not stop the Gmail watch for {email}: {error}", email=integration.email, error=error)
 
     if token := integration.refresh_token:
       await google_oauth.revoke_token(token)
     else:
-      logging.warning("No refresh token for %s: access not revoked at Google", integration.email)
+      logfire.warning("No refresh token for {email}: access not revoked at Google", email=integration.email)
 
     return await self.repository.delete(integration.id, user_id)
 
@@ -75,7 +75,7 @@ class GmailService:
     """Lee los mensajes nuevos que anuncia la notificación de Pub/Sub."""
     integration = await self.repository.get_by_email(Provider.GOOGLE, email)
     if not integration:
-      logging.warning("Notification for %s: account not connected, ignored", email)
+      logfire.warning("Notification for {email}: account not connected, ignored", email=email)
       return []  # cuenta desconectada: la notificación llega igual un rato
 
     integration = await self.renew_watch_if_expiring(integration)
@@ -85,7 +85,7 @@ class GmailService:
       # nunca sincronizada: empieza a seguir desde aquí, sin traer el pasado
       integration.history_id = history_id
       await self.repository.upsert(integration)
-      logging.info("First sync for %s from historyId %s", email, history_id)
+      logfire.info("First sync for {email} from historyId {history_id}", email=email, history_id=history_id)
       return []
 
     try:
@@ -102,19 +102,19 @@ class GmailService:
         message = await gmail.get_message(token, message_id)
       except gmail.MessageNotFound:
         # borrado o movido a spam desde que el historial lo anunció: no corta el resto
-        logging.info("Message %s no longer in %s, skipped", message_id, email)
+        logfire.info("Message {message_id} no longer in {email}, skipped", message_id=message_id, email=email)
         continue
       # el borrador se indexa mientras se escribe y desaparece al enviar, con otro id:
       # guardarlo deja un mensaje fantasma duplicado en el hilo
       if "DRAFT" in message["labels"]:
-        logging.info("Message %s is a draft, skipped", message_id)
+        logfire.info("Message {message_id} is a draft, skipped", message_id=message_id)
         continue
       messages.append(message)
-      logging.info(
-        "New mail from %s for %s (user %s)",
-        message.get("sender"),
-        email,
-        integration.user_id,
+      logfire.info(
+        "New mail from {sender} for {email} (user {user_id})",
+        sender=message.get("sender"),
+        email=email,
+        user_id=integration.user_id,
       )
 
     integration.history_id = marker

@@ -13,9 +13,11 @@ dependencies = [
     "httptools>=0.8.0",
     "itsdangerous>=2.2.0",
     "joserfc>=1.7.4",
+    "logfire[fastapi,system-metrics]>=4.40.0",
     "motor>=3.7.1",
     "pydantic-ai-slim[cli,openai]>=2.26.0",
     "pydantic-extra-types[all]>=2.11.1",
+    "uvicorn>=0.52.1",
     "uvloop>=0.22.1",
 ]
 

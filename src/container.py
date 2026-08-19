@@ -1,4 +1,4 @@
-import logging
+import logfire
 import os
 from dependency_injector import containers, providers
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -44,10 +44,10 @@ async def mongo_client(uri: str, db_name: str):
   client = AsyncIOMotorClient(uri)
   try:
     await client.admin.command("ping")  # Motor conecta en diferido: forzamos la conexión
-    logging.info("MongoDB connected -> %s", uri)
+    logfire.info("MongoDB connected -> {uri}", uri=uri)
     await create_indexes(client[db_name])
   except Exception as error:
-    logging.error("MongoDB unavailable (%s): %s", uri, error)
+    logfire.error("MongoDB unavailable ({uri}): {error}", uri=uri, error=error)
   yield client
   client.close()
 

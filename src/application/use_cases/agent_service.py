@@ -1,4 +1,4 @@
-import logging
+import logfire
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, List
@@ -74,31 +74,33 @@ class AgentService:
      )
     
   async def run_tasks(self, owner_email: str, thread_messages: Optional[List[AgentEmailMessage]], new_message: AgentEmailMessage) -> Optional[ExtractedTask]:
-    logging.info(
-      "Agent analyzing thread %s (%s previous mails) from %s for owner %s",
-      new_message.thread_id,
-      len(thread_messages or []),
-      new_message.sender,
-      owner_email,
+    logfire.info(
+      "Agent analyzing thread {thread_id} ({previous} previous mails) from {sender} for owner {owner}",
+      thread_id=new_message.thread_id,
+      previous=len(thread_messages or []),
+      sender=new_message.sender,
+      owner=owner_email,
     )
     result = await self.agent.run(self._prompt(owner_email, thread_messages, new_message))
 
     usage = result.usage
     if not result.output:
-      logging.info(
-        "Agent found no task in thread %s | %s tokens", new_message.thread_id, usage.total_tokens
+      logfire.info(
+        "Agent found no task in thread {thread_id} | {tokens} tokens",
+        thread_id=new_message.thread_id,
+        tokens=usage.total_tokens,
       )
       return None
 
     task = result.output
-    logging.info(
-      "Agent found task in thread %s | %s | '%s' | due=%s | contacts=%s | %s tokens",
-      new_message.thread_id,
-      task.status,
-      task.title,
-      task.due_at,
-      task.contacts,
-      usage.total_tokens,
+    logfire.info(
+      "Agent found task in thread {thread_id} | {status} | '{title}' | due={due_at} | contacts={contacts} | {tokens} tokens",
+      thread_id=new_message.thread_id,
+      status=task.status,
+      title=task.title,
+      due_at=task.due_at,
+      contacts=task.contacts,
+      tokens=usage.total_tokens,
     )
     return task
 

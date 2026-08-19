@@ -1,5 +1,5 @@
-import logging
 import os
+import logfire
 from arq.connections import RedisSettings, create_pool
 
 from src.infrastructure.driven.redis.functions.process_gmail_notification import (
@@ -17,9 +17,9 @@ async def redis_pool():
   # create_pool ya hace ping: si Redis no está, lanza aquí mismo
   try:
     pool = await create_pool(REDIS)
-    logging.info("Redis connected -> %s:%s", REDIS.host, REDIS.port)
+    logfire.info("Redis connected -> {host}:{port}", host=REDIS.host, port=REDIS.port)
   except Exception as error:
-    logging.error("Redis unavailable (%s:%s): %s", REDIS.host, REDIS.port, error)
+    logfire.error("Redis unavailable ({host}:{port}): {error}", host=REDIS.host, port=REDIS.port, error=error)
     pool = None
   yield pool
   if pool:
@@ -30,11 +30,8 @@ async def startup(ctx) -> None:
 
   from src.container import Container
 
-  logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
-    datefmt="%H:%M:%S",
-  )
+  # El worker es otro proceso: necesita su propio configure para enviar a Logfire
+  logfire.configure(environment=os.getenv("ENV"), service_name="arq-worker")
 
   container = Container()
   await container.init_resources()
@@ -47,7 +44,7 @@ async def startup(ctx) -> None:
   ctx["contact_service"] = await container.contact_service()
   # sin Resource async detrás: Factory ya devuelve la instancia, no hay que esperarla
   ctx["agent_service"] = container.agent_service()
-  logging.info("ARQ worker started!")
+  logfire.info("ARQ worker started!")
 
 
 async def shutdown(ctx) -> None:

@@ -1,4 +1,4 @@
-import logging
+import logfire
 
 from src.application.use_cases.agent_service import AgentEmailMessage
 from src.application.use_cases.contact_service import ContactEmailAlreadyUsed
@@ -50,7 +50,7 @@ async def _resolve_contacts(ctx, user_id, own_email: str, extracted_contacts) ->
             phone=extracted.phone,
           )
         )
-        logging.info("Contact %s created for user %s", extracted.email, user_id)
+        logfire.info("Contact {email} created for user {user_id}", email=extracted.email, user_id=user_id)
       except ContactEmailAlreadyUsed:
         # carrera con otro job del mismo hilo: el que perdió vuelve a leerlo
         contact = await ctx["contact_service"].get_by_email(user_id, extracted.email)
@@ -60,17 +60,27 @@ async def _resolve_contacts(ctx, user_id, own_email: str, extracted_contacts) ->
 
 async def process_gmail_notification(ctx, email: str, history_id: str) -> None:
   """El job que el worker desencola: analiza los correos nuevos y guarda los que son tarea."""
-  messages = await ctx["gmail_service"].process_notification(
-    email=email, history_id=history_id
-  )
-  if not messages:
-    return
+  with logfire.span(
+    "process_gmail_notification {email}", email=email, history_id=history_id
+  ) as span:
+    messages = await ctx["gmail_service"].process_notification(
+      email=email, history_id=history_id
+    )
+    span.set_attribute("messages", len(messages or []))
+    if not messages:
+      logfire.info("No new messages for {email}", email=email)
+      return
 
-  integration = await ctx["integration_service"].get_by_email(Provider.GOOGLE, email)
-  user_id = integration.user_id
+    integration = await ctx["integration_service"].get_by_email(Provider.GOOGLE, email)
+    user_id = integration.user_id
 
+    await _process_messages(ctx, messages, email, user_id, integration)
+
+
+async def _process_messages(ctx, messages, email, user_id, integration) -> None:
   for message in messages:
     thread_id = message["thread_id"]
+    logfire.info("Processing message {message_id} for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
     stored = await ctx["message_service"].list_by_thread_id_user_id(user_id, thread_id)
 
     extracted = await ctx["agent_service"].run_tasks(
@@ -80,7 +90,7 @@ async def process_gmail_notification(ctx, email: str, history_id: str) -> None:
     )
 
     if not extracted:
-      logging.info("Message %s for %s carries no task, skipped", message["id"], email)
+      logfire.info("Message {message_id} for {email} carries no task, skipped", message_id=message["id"], email=email)
       continue
 
     await ctx["message_service"].upsert(
@@ -97,7 +107,7 @@ async def process_gmail_notification(ctx, email: str, history_id: str) -> None:
         internal_date=message["internal_date"],
       )
     )
-    logging.info("Message %s saved for %s (user %s)", message["id"], email, user_id)
+    logfire.info("Message {message_id} saved for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
 
     await ctx["task_service"].upsert(
       Task(
@@ -110,4 +120,4 @@ async def process_gmail_notification(ctx, email: str, history_id: str) -> None:
         contact_ids=await _resolve_contacts(ctx, user_id, email, extracted.contacts),
       )
     )
-    logging.info("Task upserted for thread %s (user %s)", thread_id, user_id)
+    logfire.info("Task upserted for thread {thread_id} (user {user_id})", thread_id=thread_id, user_id=user_id)

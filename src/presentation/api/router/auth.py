@@ -1,4 +1,4 @@
-import logging
+import logfire
 import os
 from typing import Annotated
 
@@ -106,7 +106,7 @@ async def google_callback(
     try:
       await gmail_service.start_watch(saved)
     except (GmailError, httpx.HTTPError):
-      logging.exception("Could not start Gmail watch for %s", saved.email)
+      logfire.exception("Could not start Gmail watch for {email}", email=saved.email)
 
   redirect = RedirectResponse(os.getenv("FRONTEND_REDIRECT", "/"))
   set_session_cookie(redirect, jwt_token)

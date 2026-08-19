@@ -1,15 +1,8 @@
-import logging
 import os
+import logfire
 
 from dotenv import load_dotenv
 load_dotenv()
-
-# Sin esto uvicorn silencia el logger raíz y no ves nada en la terminal
-logging.basicConfig(
-  level=os.getenv("LOG_LEVEL", "INFO"),
-  format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
-  datefmt="%H:%M:%S",
-)
 
 from contextlib import asynccontextmanager
 
@@ -43,6 +36,12 @@ app.include_router(gmail_webhook.router, prefix="/api/v1")
 app.include_router(contact.router, prefix="/api/v1")
 app.include_router(task.router, prefix="/api/v1")
 app.include_router(message.router, prefix="/api/v1")
+
+# Add Logfire: separa los logs por entorno (local / prod) según ENVIRONMENT en .env
+logfire.configure(environment=os.getenv("ENV"))
+logfire.instrument_system_metrics()
+logfire.instrument_fastapi(app)
+
 
 # Sesión firmada (itsdangerous): la necesita el flujo OAuth de Authlib para el state
 app.add_middleware(
