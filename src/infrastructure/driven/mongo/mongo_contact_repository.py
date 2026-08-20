@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 from dataclasses import asdict
 from datetime import datetime, UTC
@@ -37,9 +38,14 @@ class MongoContactRepository:
     doc = await self.collection.find_one({"user_id": user_id, "email": email})
     return _to_contact(doc) if doc else None
 
-  async def get_by_user(self, user_id: ObjectId) -> list[Contact]:
+  async def get_by_user(self, user_id: ObjectId, search: Optional[str] = None) -> list[Contact]:
     # user_id en el filtro: nadie lee los contactos de otro
-    cursor = self.collection.find({"user_id": user_id})
+    filter = {"user_id": user_id}
+    if search:
+      # ponytail: regex case-insensitive sin índice; text index si la colección crece
+      pattern = {"$regex": re.escape(search), "$options": "i"}
+      filter["$or"] = [{"name": pattern}, {"email": pattern}]
+    cursor = self.collection.find(filter)
     return [_to_contact(d) async for d in cursor.sort("name", 1)]
 
   async def update(self, contact_id: ObjectId, user_id: ObjectId, changes: dict) -> Optional[Contact]:

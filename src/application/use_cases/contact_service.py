@@ -24,8 +24,8 @@ class ContactService:
   async def get_by_email(self, user_id: ObjectId, email: str) -> Optional[Contact]:
     return await self.repository.get_by_email(user_id, email)
 
-  async def get_by_user(self, user_id: ObjectId) -> list[Contact]:
-    return await self.repository.get_by_user(user_id)
+  async def get_by_user(self, user_id: ObjectId, search: Optional[str] = None) -> list[Contact]:
+    return await self.repository.get_by_user(user_id, search)
 
   async def update(self, contact_id: ObjectId, user_id: ObjectId, changes: dict) -> Optional[Contact]:
     if "email" in changes:

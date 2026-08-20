@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from dependency_injector.wiring import inject, Provide
 
@@ -32,8 +32,9 @@ async def create_contact(payload: ContactCreate, service: Service, current: Curr
 
 @router.get("", response_model=list[ContactOut])
 @inject
-async def list_contacts(service: Service, current: CurrentUser):
-  return await service.get_by_user(current.id)
+async def list_contacts(service: Service, current: CurrentUser, search: Optional[str] = None):
+  """search filtra por nombre o email (subcadena, case-insensitive)."""
+  return await service.get_by_user(current.id, search)
 
 
 @router.get("/{id}", response_model=ContactOut)
