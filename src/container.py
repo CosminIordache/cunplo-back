@@ -7,6 +7,7 @@ from src.application.use_cases.agent_service import AgentService
 from src.application.use_cases.auth_service import AuthService
 from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
+from src.application.use_cases.outlook_service import OutlookService
 from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.message_service import MessageService
 from src.application.use_cases.task_service import TaskService
@@ -17,7 +18,7 @@ from src.infrastructure.driven.mongo.mongo_message_repository import MongoMessag
 from src.infrastructure.driven.mongo.mongo_task_repository import MongoTaskRepository
 from src.infrastructure.driven.mongo.mongo_user_repository import MongoUserRepository
 from src.infrastructure.driven.redis.worker import redis_pool
-from src.infrastructure.external_services.google_oauth import refresh_token
+from src.infrastructure.external_services.oauth_refresh import refresh_token
 
 
 async def create_indexes(db) -> None:
@@ -27,6 +28,8 @@ async def create_indexes(db) -> None:
   await db["integrations"].create_index([("user_id", 1), ("provider", 1)], unique=True)
   # el webhook de Gmail busca por email; no es único, la misma cuenta vale para varios usuarios
   await db["integrations"].create_index([("provider", 1), ("email", 1)])
+  # el webhook de Graph solo trae el id de la subscription; sparse: solo Microsoft lo tiene
+  await db["integrations"].create_index("subscription_id", sparse=True)
   # el id de Gmail solo es único dentro de una cuenta: la pareja evita duplicar
   await db["messages"].create_index([("integration_id", 1), ("provider_id", 1)], unique=True)
   # el hilo se lee ordenado por fecha
@@ -64,6 +67,7 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
+      "src.infrastructure.driving.outlook_webhook",
     ]
   )
 
@@ -96,6 +100,17 @@ class Container(containers.DeclarativeContainer):
   contact_service = providers.Factory(ContactService, repository=contact_repository)
 
   agent_service = providers.Factory(AgentService)
+
+  # vacío desactiva el push de Outlook, como PUBSUB_TOPIC con Gmail
+  config.graph_notification_url.from_env("GRAPH_NOTIFICATION_URL", "")
+  config.graph_client_state.from_env("GRAPH_CLIENT_STATE", "")
+  outlook_service = providers.Factory(
+    OutlookService,
+    repository=integration_repository,
+    integrations=integration_service,
+    notification_url=config.graph_notification_url,
+    secret=config.graph_client_state,
+  )
 
   config.pubsub_topic.from_env("PUBSUB_TOPIC", "")
   gmail_service = providers.Factory(

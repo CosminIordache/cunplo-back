@@ -26,7 +26,7 @@ async def revoke_token(token: str) -> None:
     await http.post("https://oauth2.googleapis.com/revoke", data={"token": token})
 
 
-async def refresh_token(provider, refresh_token: str) -> dict:
+async def refresh_token(refresh_token: str) -> dict:
   """Canjea un refresh_token por un access_token nuevo. Lanza OAuthError si ya no vale."""
   return await google.fetch_access_token(
     grant_type="refresh_token",

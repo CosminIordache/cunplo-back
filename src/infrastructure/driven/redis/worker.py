@@ -5,6 +5,9 @@ from arq.connections import RedisSettings, create_pool
 from src.infrastructure.driven.redis.functions.process_gmail_notification import (
   process_gmail_notification,
 )
+from src.infrastructure.driven.redis.functions.process_outlook_sync import (
+  process_outlook_sync,
+)
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -38,7 +41,9 @@ async def startup(ctx) -> None:
   ctx["container"] = container
   # los providers dependen de un Resource async (el cliente de Mongo): hay que esperarlos
   ctx["gmail_service"] = await container.gmail_service()
+  ctx["outlook_service"] = await container.outlook_service()
   ctx["integration_service"] = await container.integration_service()
+  ctx["integration_repository"] = await container.integration_repository()
   ctx["message_service"] = await container.message_service()
   ctx["task_service"] = await container.task_service()
   ctx["contact_service"] = await container.contact_service()
@@ -54,7 +59,7 @@ async def shutdown(ctx) -> None:
 class WorkerSettings:
   """Arranca con: uv run arq src.infrastructure.driven.redis.worker.WorkerSettings"""
 
-  functions = [process_gmail_notification]
+  functions = [process_gmail_notification, process_outlook_sync]
   redis_settings = REDIS
   on_startup = startup
   on_shutdown = shutdown

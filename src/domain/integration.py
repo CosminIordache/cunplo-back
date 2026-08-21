@@ -8,6 +8,7 @@ from bson import ObjectId
 
 class Provider(StrEnum):
   GOOGLE = "google"
+  MICROSOFT = "microsoft"
 
 
 @dataclass
@@ -22,7 +23,8 @@ class Integration:
   access_token: Optional[str] = None
   expires_at: Optional[datetime] = None
   history_id: Optional[str] = None  # versión del buzón hasta la que hemos procesado
-  watch_expires_at: Optional[datetime] = None  # el watch de Gmail caduca a los 7 días
+  watch_expires_at: Optional[datetime] = None  # Gmail caduca a los 7 días, Graph a los 3
+  subscription_id: Optional[str] = None  # id de la subscription de Graph, solo Microsoft
 
   id: ObjectId = field(default_factory=ObjectId)
   created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
