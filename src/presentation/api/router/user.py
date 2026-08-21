@@ -4,6 +4,7 @@ from dependency_injector.wiring import inject, Provide
 
 from src.container import Container
 from src.application.use_cases.gmail_service import GmailService
+from src.application.use_cases.outlook_service import OutlookService
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
 from src.infrastructure.utils.security import COOKIE_NAME
 from src.presentation.api.schemas.user import UserUpdate, UserOut
@@ -18,6 +19,7 @@ router = APIRouter(
 
 Service = Annotated[UserService, Depends(Provide[Container.user_service])]
 Gmail = Annotated[GmailService, Depends(Provide[Container.gmail_service])]
+Outlook = Annotated[OutlookService, Depends(Provide[Container.outlook_service])]
 
 @router.get("/list", response_model=list[UserOut])
 @inject
@@ -59,13 +61,15 @@ async def delete_user(
   id: ObjectIdParam,
   service: Service,
   gmail_service: Gmail,
+  outlook_service: Outlook,
   current: CurrentUser,
   response: Response,
 ):
   if id != current.id:
     raise HTTPException(status.HTTP_403_FORBIDDEN, "not your user")
-  # primero Google: si el borrado falla, mejor sobra una revocación que un acceso vivo
+  # primero las integraciones: si el borrado falla, mejor sobra una revocación que un acceso vivo
   await gmail_service.disconnect(id)
+  await outlook_service.disconnect(id)
   if not await service.delete(id):
     raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
   response.delete_cookie(COOKIE_NAME, path="/")
