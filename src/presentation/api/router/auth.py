@@ -99,7 +99,7 @@ async def google_callback(
     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "google auth failed")
 
   claims = token["userinfo"]
-  user, jwt_token = await service.login_google(claims)
+  user, jwt_token = await service.login_oauth(claims)
   saved = await integrations.connect(
     user_id=user.id,
     provider=Provider.GOOGLE,
@@ -144,7 +144,7 @@ async def microsoft_callback(
   claims = token["userinfo"]
   # las cuentas personales no siempre traen 'email': 'preferred_username' es el fallback
   email = claims.get("email") or claims["preferred_username"]
-  user, jwt_token = await service.login_google({**claims, "email": email})
+  user, jwt_token = await service.login_oauth({**claims, "email": email})
   saved = await integrations.connect(
     user_id=user.id,
     provider=Provider.MICROSOFT,

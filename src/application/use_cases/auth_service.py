@@ -25,7 +25,7 @@ class AuthService:
       raise InvalidCredentials
     return user, create_token(str(user.id))
 
-  async def login_google(self, claims: dict) -> tuple[User, str]:
+  async def login_oauth(self, claims: dict) -> tuple[User, str]:
     """Alta o login con los claims del id_token (el email ya viene verificado)."""
     user = await self.users.get_by_email(claims["email"])
     if not user:
@@ -36,7 +36,7 @@ class AuthService:
           password=None, 
           phone=None,
           timezone="UTC",
-          language="en",
+          language=claims.get("locale", "en").split("-")[0],
         )
       )
     return user, create_token(str(user.id))
