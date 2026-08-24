@@ -19,3 +19,6 @@ class MessageService:
 
   async def delete_by_thread(self, user_id: ObjectId, thread_id: str) -> int:
     return await self.repository.delete_by_thread(user_id, thread_id)
+
+  async def delete_all_by_user(self, user_id: ObjectId) -> int:
+    return await self.repository.delete_all_by_user(user_id)

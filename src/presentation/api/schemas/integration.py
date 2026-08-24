@@ -11,6 +11,7 @@ class IntegrationOut(BaseModel):
 
   id: Annotated[str, BeforeValidator(str)]
   provider: str
+  account_id: str
   email: str
   scopes: list[str]
   created_at: datetime

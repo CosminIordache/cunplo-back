@@ -1,7 +1,7 @@
 from typing import Optional
 from bson import ObjectId
 
-from src.domain.user import User
+from src.domain.user import AuthProvider, User
 from src.application.ports.user_repository import UserRepository
 from src.infrastructure.utils.security import hash_password
 
@@ -26,6 +26,11 @@ class UserService:
 
   async def get_by_email(self, email: str) -> Optional[User]:
     return await self.repository.get_by_email(email)
+
+  async def get_by_auth_account(
+    self, auth_provider: AuthProvider, auth_account_id: str
+  ) -> Optional[User]:
+    return await self.repository.get_by_auth_account(auth_provider, auth_account_id)
 
   async def list(self) -> list[User]:
     return await self.repository.list()

@@ -29,26 +29,34 @@ class MongoIntegrationRepository:
     self.collection = db["integrations"]
 
   async def upsert(self, integration: Integration) -> Integration:
-    """Una integración por usuario y provider: reconectar actualiza en vez de duplicar,
-    aunque sea con otra cuenta de Google."""
+    """Una integración por usuario, provider y cuenta: reconectar la misma cuenta
+    actualiza, conectar otra distinta inserta una fila más."""
     integration.updated_at = datetime.now(UTC)
     document = _to_document(integration)
     document.pop("_id")
     document.pop("created_at")
     await self.collection.update_one(
-      {"user_id": integration.user_id, "provider": integration.provider},
+      {
+        "user_id": integration.user_id,
+        "provider": integration.provider,
+        "account_id": integration.account_id,
+      },
       {"$set": document, "$setOnInsert": {"_id": integration.id, "created_at": integration.created_at}},
       upsert=True,
     )
     return integration
 
-  async def get_by_user(self, user_id: ObjectId, provider: Provider) -> Optional[Integration]:
+  async def get(self, integration_id: ObjectId, user_id: ObjectId) -> Optional[Integration]:
     # user_id en el filtro: nadie lee integraciones de otro
-    doc = await self.collection.find_one({"user_id": user_id, "provider": provider})
+    doc = await self.collection.find_one({"_id": integration_id, "user_id": user_id})
     return _to_integration(doc) if doc else None
 
-  async def get_by_account(self, provider: Provider, account_id: str) -> Optional[Integration]:
-    doc = await self.collection.find_one({"provider": provider, "account_id": account_id})
+  async def get_by_user_account(
+    self, user_id: ObjectId, provider: Provider, account_id: str
+  ) -> Optional[Integration]:
+    doc = await self.collection.find_one(
+      {"user_id": user_id, "provider": provider, "account_id": account_id}
+    )
     return _to_integration(doc) if doc else None
 
   async def get_by_email(self, provider: Provider, email: str) -> Optional[Integration]:
@@ -60,8 +68,21 @@ class MongoIntegrationRepository:
     doc = await self.collection.find_one({"subscription_id": subscription_id})
     return _to_integration(doc) if doc else None
 
-  async def list_by_user(self, user_id: ObjectId) -> list[Integration]:
-    return [_to_integration(d) async for d in self.collection.find({"user_id": user_id})]
+  async def list_by_user(
+    self, user_id: ObjectId, provider: Optional[Provider] = None
+  ) -> list[Integration]:
+    query = {"user_id": user_id}
+    if provider:
+      query["provider"] = provider
+    return [_to_integration(d) async for d in self.collection.find(query)]
+
+  async def list_expiring(self, provider: Provider, before: datetime) -> list[Integration]:
+    """Las que caducan antes de 'before', y las que nunca han tenido push."""
+    query = {
+      "provider": provider,
+      "$or": [{"watch_expires_at": {"$lt": before}}, {"watch_expires_at": None}],
+    }
+    return [_to_integration(d) async for d in self.collection.find(query)]
 
   async def delete(self, integration_id: ObjectId, user_id: ObjectId) -> bool:
     # user_id en el filtro: nadie borra integraciones de otro

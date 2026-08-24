@@ -1,6 +1,6 @@
 from typing import Optional
 
-from src.domain.user import User
+from src.domain.user import AuthProvider, User
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
 from src.infrastructure.utils.security import create_token, verify_password
 
@@ -25,20 +25,35 @@ class AuthService:
       raise InvalidCredentials
     return user, create_token(str(user.id))
 
-  async def login_oauth(self, claims: dict) -> tuple[User, str]:
-    """Alta o login con los claims del id_token (el email ya viene verificado)."""
-    user = await self.users.get_by_email(claims["email"])
+  async def login_oauth(
+    self, auth_provider: AuthProvider, claims: dict
+  ) -> tuple[User, str]:
+    """Alta o login con los claims del id_token (el email ya viene verificado).
+    La identidad es el 'sub', no el email: el usuario puede cambiarlo o tener varios."""
+    user = await self.users.get_by_auth_account(auth_provider, claims["sub"])
+
     if not user:
-      user = await self.users.create(
-        User(
-          username=claims.get("name") or claims["email"].split("@")[0],
-          email=claims["email"],
-          password=None, 
-          phone=None,
-          timezone="UTC",
-          language=claims.get("locale", "en").split("-")[0],
+      # primera vez con este proveedor: si el email ya existe, vinculamos en vez de duplicar
+      user = await self.users.get_by_email(claims["email"])
+      if user:
+        user = await self.users.update(
+          user.id,
+          {"auth_provider": auth_provider, "auth_account_id": claims["sub"]},
         )
-      )
+      else:
+        user = await self.users.create(
+          User(
+            username=claims.get("name") or claims["email"].split("@")[0],
+            email=claims["email"],
+            password=None,
+            phone=None,
+            timezone="UTC",
+            language=claims.get("locale", "en").split("-")[0],
+            auth_provider=auth_provider,
+            auth_account_id=claims["sub"],
+          )
+        )
+
     return user, create_token(str(user.id))
 
   async def current(self, user_id) -> Optional[User]:

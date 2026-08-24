@@ -41,3 +41,15 @@ class TaskService:
       thread_id=task.thread_id,
     )
     return await self.repository.delete(task_id, user_id)
+
+  async def delete_all_by_user(self, user_id: ObjectId) -> int:
+    """Igual que delete pero para todo el usuario: las tareas se llevan sus mensajes."""
+    deleted_messages = await self.messages.delete_all_by_user(user_id)
+    deleted = await self.repository.delete_all_by_user(user_id)
+    logfire.info(
+      "Deleted {deleted} tasks and {deleted_messages} messages of user {user_id}",
+      deleted=deleted,
+      deleted_messages=deleted_messages,
+      user_id=user_id,
+    )
+    return deleted

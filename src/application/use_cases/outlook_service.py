@@ -32,11 +32,25 @@ class OutlookService:
     self.secret = secret
 
   async def start_subscription(self, integration: Integration) -> Integration:
-    """Activa el push de Graph. Hay que renovarlo antes de los ~3 días."""
+    """Activa o renueva el push de Graph. Hay que renovarlo antes de los ~3 días."""
     token = await self.integrations.access_token_for(integration)
-    result = await outlook.subscribe(
-      token, self.notification_url, self.secret, _expiration()
-    )
+    result = None
+    if integration.subscription_id:
+      try:
+        result = await outlook.renew_subscription(
+          token, integration.subscription_id, _expiration()
+        )
+      except outlook.OutlookError as error:
+        # Graph no renueva una subscription ya caducada: hay que darla de alta otra vez
+        logfire.warning(
+          "Could not renew the Graph subscription for {email}, recreating: {error}",
+          email=integration.email,
+          error=error,
+        )
+    if result is None:
+      result = await outlook.subscribe(
+        token, self.notification_url, self.secret, _expiration()
+      )
     integration.subscription_id = result["id"]
     integration.watch_expires_at = datetime.fromisoformat(
       result["expirationDateTime"].replace("Z", "+00:00")
@@ -46,56 +60,40 @@ class OutlookService:
       integration.history_id = await outlook.current_delta_link(token)
     return await self.repository.upsert(integration)
 
-  ##TODO: la renovación depende de que llegue un correo. Si la subscription caduca del
-  #       todo (worker parado >3 días, o buzón sin actividad en ese tiempo) el push deja
-  #       de llegar y solo se recupera reconectando la cuenta a mano. Crear un cron diario
-  #       que renueve las que estén por caducar, sin esperar a la notificación.
-  async def renew_subscription_if_expiring(self, integration: Integration) -> Integration:
-    """Renueva si le queda menos de un día, igual que el watch de Gmail."""
-    if not self.notification_url or not integration.subscription_id:
-      return integration
+  async def renew_expiring_subscriptions(self) -> int:
+    """Renueva todas las subscriptions que caducan pronto. Lo llama el cron diario:
+    sin él, un buzón sin correo durante 3 días pierde el push y nadie se entera."""
+    if not self.notification_url:
+      return 0
 
-    expires_at = integration.watch_expires_at
-    if expires_at:
-      if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=UTC)
-      if expires_at - datetime.now(UTC) > timedelta(days=1):
-        return integration
+    # margen de 1 día: Graph solo da ~3, así que el cron diario va justo
+    deadline = datetime.now(UTC) + timedelta(days=1)
+    expiring = await self.repository.list_expiring(Provider.MICROSOFT, deadline)
 
-    try:
-      token = await self.integrations.access_token_for(integration)
-      result = await outlook.renew_subscription(
-        token, integration.subscription_id, _expiration()
-      )
-      integration.watch_expires_at = datetime.fromisoformat(
-        result["expirationDateTime"].replace("Z", "+00:00")
-      )
-      integration = await self.repository.upsert(integration)
-      logfire.info(
-        "Graph subscription renewed for {email} until {expires_at}",
-        email=integration.email,
-        expires_at=integration.watch_expires_at,
-      )
-    except (ReauthRequired, outlook.OutlookError) as error:
-      # caducada del todo: la próxima notificación no llegará, se recrea al reconectar
-      logfire.warning(
-        "Could not renew the Graph subscription for {email}: {error}",
-        email=integration.email,
-        error=error,
-      )
-    return integration
+    renewed = 0
+    for integration in expiring:
+      try:
+        await self.start_subscription(integration)
+        renewed += 1
+      except (ReauthRequired, outlook.OutlookError) as error:
+        # una cuenta rota no puede parar las demás
+        logfire.warning(
+          "Could not renew the Graph subscription for {email}: {error}",
+          email=integration.email,
+          error=error,
+        )
 
-  async def sync(self, user_id: ObjectId) -> list[dict]:
-    """Correos nuevos desde la última sincronización. Avanza el marcador."""
-    integration = await self.repository.get_by_user(user_id, Provider.MICROSOFT)
-    if not integration:
-      return []
+    logfire.info(
+      "Graph subscriptions renewed: {renewed}/{total}", renewed=renewed, total=len(expiring)
+    )
+    return renewed
 
-    # de paso, como el watch de Gmail: sin cron, aprovechando que ha llegado un correo
-    integration = await self.renew_subscription_if_expiring(integration)
+  async def sync(self, integration: Integration) -> list[dict]:
+    """Correos nuevos desde la última sincronización de una cuenta. Avanza el marcador."""
+    
     token = await self.integrations.access_token_for(integration)
 
-    # primera vez: solo dejamos el marcador puesto, sin traer el buzón entero
+    # primera vez: solo dejamos el marcador puesto, sin traer el buzón enter
     if not integration.history_id:
       integration.history_id = await outlook.current_delta_link(token)
       await self.repository.upsert(integration)
@@ -105,7 +103,6 @@ class OutlookService:
     try:
       messages, marker = await outlook.new_messages(token, integration.history_id)
     except outlook.DeltaTooOld:
-      # ponytail: nos saltamos el hueco, igual que Gmail con HistoryTooOld
       integration.history_id = await outlook.current_delta_link(token)
       await self.repository.upsert(integration)
       logfire.info("Outlook delta expired for {email}, resynced", email=integration.email)
@@ -123,12 +120,11 @@ class OutlookService:
     )
     return messages
 
-  async def disconnect(self, user_id: ObjectId) -> bool:
+  async def disconnect(self, integration: Integration) -> bool:
     """Corta el push antes de borrar: si no, Graph sigue notificando por una cuenta
     que ya no existe. Microsoft no expone revocación por token: el consentimiento
     lo retira el usuario desde su cuenta."""
-    integration = await self.repository.get_by_user(user_id, Provider.MICROSOFT)
-    if integration and integration.subscription_id:
+    if integration.subscription_id:
       try:
         token = await self.integrations.access_token_for(integration)
         await outlook.unsubscribe(token, integration.subscription_id)
@@ -139,6 +135,4 @@ class OutlookService:
           email=integration.email,
           error=error,
         )
-    if not integration:
-      return False
-    return await self.repository.delete(integration.id, user_id)
+    return await self.repository.delete(integration.id, integration.user_id)

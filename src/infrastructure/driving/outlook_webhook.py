@@ -44,6 +44,9 @@ async def outlook_push(
       )
       continue
 
-    await queue.enqueue_job("process_outlook_sync", str(integration.user_id))
+    # el id de la integración, no el del usuario: puede tener varias cuentas de Outlook
+    await queue.enqueue_job(
+      "process_outlook_sync", str(integration.id), str(integration.user_id)
+    )
 
   return Response(status_code=status.HTTP_202_ACCEPTED)

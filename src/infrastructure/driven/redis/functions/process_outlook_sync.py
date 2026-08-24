@@ -5,7 +5,6 @@ from bson import ObjectId
 from src.application.use_cases.agent_service import AgentEmailMessage
 from src.application.use_cases.contact_service import ContactEmailAlreadyUsed
 from src.domain.contact import Contact
-from src.domain.integration import Provider
 from src.domain.message import Message
 from src.domain.task import Task
 
@@ -60,22 +59,23 @@ async def _resolve_contacts(ctx, user_id, own_email: str, extracted_contacts) ->
   return contact_ids
 
 
-async def process_outlook_sync(ctx, user_id: str) -> None:
-  """El job que el worker desencola: analiza los correos nuevos de Outlook y guarda
-  los que son tarea. Sin push todavía, así que se encola desde el endpoint de sync."""
+async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
+  """El job que el worker desencola: analiza los correos nuevos de una cuenta de
+  Outlook y guarda los que son tarea. Lo encola el webhook de Graph."""
   # arq serializa el job: el ObjectId viaja como str y aquí se reconstruye
-  user_id = ObjectId(user_id)
-  with logfire.span("process_outlook_sync {user_id}", user_id=user_id) as span:
-    messages = await ctx["outlook_service"].sync(user_id)
-    span.set_attribute("messages", len(messages or []))
-    if not messages:
-      logfire.info("No new Outlook messages for user {user_id}", user_id=user_id)
+  integration_id, user_id = ObjectId(integration_id), ObjectId(user_id)
+  with logfire.span("process_outlook_sync {integration_id}", integration_id=integration_id) as span:
+    integration = await ctx["integration_repository"].get(integration_id, user_id)
+    if not integration:
+      logfire.warning("Integration {integration_id} is gone, sync skipped", integration_id=integration_id)
       return
 
-    integration = await ctx["integration_repository"].get_by_user(
-      user_id, Provider.MICROSOFT
-    )
     email = integration.email
+    messages = await ctx["outlook_service"].sync(integration)
+    span.set_attribute("messages", len(messages or []))
+    if not messages:
+      logfire.info("No new Outlook messages for {email}", email=email)
+      return
 
     for message in messages:
       thread_id = message["thread_id"]

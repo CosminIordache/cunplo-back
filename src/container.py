@@ -24,12 +24,19 @@ from src.infrastructure.external_services.oauth_refresh import refresh_token
 async def create_indexes(db) -> None:
   """create_index es idempotente: se puede llamar en cada arranque."""
   await db["users"].create_index("email", unique=True)
-  # la regla: una integración por usuario y provider
-  await db["integrations"].create_index([("user_id", 1), ("provider", 1)], unique=True)
+  # la identidad de login es el 'sub' del proveedor, no el email
+  await db["users"].create_index(
+    [("auth_provider", 1), ("auth_account_id", 1)], unique=True, sparse=True
+  )
+  # la regla: una integración por usuario, provider y cuenta (multicuenta)
+  await db["integrations"].create_index(
+    [("user_id", 1), ("provider", 1), ("account_id", 1)], unique=True
+  )
   # el webhook de Gmail busca por email; no es único, la misma cuenta vale para varios usuarios
   await db["integrations"].create_index([("provider", 1), ("email", 1)])
   # el webhook de Graph solo trae el id de la subscription; sparse: solo Microsoft lo tiene
-  await db["integrations"].create_index("subscription_id", sparse=True)
+  # único: con varias cuentas de Microsoft dos filas no pueden compartir subscription
+  await db["integrations"].create_index("subscription_id", unique=True, sparse=True)
   # el id de Gmail solo es único dentro de una cuenta: la pareja evita duplicar
   await db["messages"].create_index([("integration_id", 1), ("provider_id", 1)], unique=True)
   # el hilo se lee ordenado por fecha

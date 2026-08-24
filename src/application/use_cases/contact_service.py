@@ -36,3 +36,6 @@ class ContactService:
 
   async def delete(self, contact_id: ObjectId, user_id: ObjectId) -> bool:
     return await self.repository.delete(contact_id, user_id)
+
+  async def delete_all_by_user(self, user_id: ObjectId) -> int:
+    return await self.repository.delete_all_by_user(user_id)

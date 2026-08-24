@@ -33,27 +33,26 @@ class IntegrationService:
     token: dict,
   ) -> Integration:
   
-    # una integración por usuario y provider: la fila es siempre la misma
-    row = await self.repository.get_by_user(user_id, provider)
-    # cuenta distinta: reemplazamos la anterior sin heredar tokens ni sincronización
-    existing = row if row and row.account_id == account_id else None
-    refresh_token = token.get("refresh_token") or (existing.refresh_token if existing else None)
+    # la cuenta es parte de la clave: si hay fila, es de esta misma cuenta
+    existing = await self.repository.get_by_user_account(user_id, provider, account_id)
 
     integration = Integration(
-      id=row.id if row else ObjectId(),
+      id=existing.id if existing else ObjectId(),
       user_id=user_id,
       provider=provider,
       account_id=account_id,
       email=email,
       scopes=scopes,
-      refresh_token=refresh_token,
+      # Google solo manda refresh_token en el primer consentimiento
+      refresh_token=token.get("refresh_token") or (existing.refresh_token if existing else None),
       access_token=token.get("access_token"),
       expires_at=datetime.fromtimestamp(token["expires_at"], UTC) if token.get("expires_at") else None,
       # estado de sincronización: sobrevive a los refrescos de token
       history_id=existing.history_id if existing else None,
       watch_expires_at=existing.watch_expires_at if existing else None,
+      subscription_id=existing.subscription_id if existing else None,
     )
-    
+
     return await self.repository.upsert(integration)
 
   async def access_token_for(self, integration: Integration) -> str:
@@ -84,8 +83,13 @@ class IntegrationService:
     
     return renewed.access_token
 
-  async def list_by_user(self, user_id: ObjectId) -> list[Integration]:
-    return await self.repository.list_by_user(user_id)
+  async def get(self, integration_id: ObjectId, user_id: ObjectId) -> Optional[Integration]:
+    return await self.repository.get(integration_id, user_id)
+
+  async def list_by_user(
+    self, user_id: ObjectId, provider: Optional[Provider] = None
+  ) -> list[Integration]:
+    return await self.repository.list_by_user(user_id, provider)
 
   async def get_by_email(self, provider: Provider, email: str) -> Optional[Integration]:
     return await self.repository.get_by_email(provider, email)

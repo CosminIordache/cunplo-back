@@ -30,35 +30,32 @@ class GmailService:
     )
     return await self.repository.upsert(integration)
 
-  #TODO: Esta funcion se ejecuta en el push notifications del usuario.
-  #      En el futuro crear un cron diario para renovación automatica.
-  async def renew_watch_if_expiring(self, integration: Integration) -> Integration:
-    """Renueva el watch si le queda menos de un día. watch() es idempotente:
-    volver a llamarlo solo extiende la caducidad.
-    """
-    if not self.topic or not integration.watch_expires_at:
-      return integration
+  async def renew_expiring_watches(self) -> int:
+    """Renueva todos los watch que caducan pronto. Lo llama el cron diario: sin él,
+    un buzón sin correo durante 7 días pierde el push y nadie se entera."""
+    if not self.topic:
+      return 0
 
-    expires_at = integration.watch_expires_at
-    if expires_at.tzinfo is None:
-      expires_at = expires_at.replace(tzinfo=UTC)
-    if expires_at - datetime.now(UTC) > timedelta(days=1):
-      return integration
+    # margen de 2 días: el cron es diario, así que hay una segunda oportunidad
+    deadline = datetime.now(UTC) + timedelta(days=2)
+    expiring = await self.repository.list_expiring(Provider.GOOGLE, deadline)
 
-    try:
-      integration = await self.start_watch(integration)
-      logfire.info("Gmail watch renewed for {email} until {expires_at}", email=integration.email, expires_at=integration.watch_expires_at)
-    except (ReauthRequired, gmail.GmailError) as error:
-      logfire.warning("Could not renew the Gmail watch for {email}: {error}", email=integration.email, error=error)
-    return integration
+    renewed = 0
+    for integration in expiring:
+      try:
+        # watch() es idempotente: sirve igual para renovar que para recrear
+        await self.start_watch(integration)
+        renewed += 1
+      except (ReauthRequired, gmail.GmailError) as error:
+        # una cuenta rota no puede parar las demás
+        logfire.warning("Could not renew the Gmail watch for {email}: {error}", email=integration.email, error=error)
 
-  async def disconnect(self, user_id: ObjectId, provider: Provider = Provider.GOOGLE) -> bool:
+    logfire.info("Gmail watches renewed: {renewed}/{total}", renewed=renewed, total=len(expiring))
+    return renewed
+
+  async def disconnect(self, integration: Integration) -> bool:
     """Corta el push y revoca el acceso antes de borrar: si no, Google sigue publicando.
-    Una integración por usuario y provider, así que no hace falta el id."""
-    integration = await self.repository.get_by_user(user_id, provider)
-    if not integration:
-      return False
-
+    Recibe la integración ya resuelta: el usuario puede tener varias cuentas."""
     try:
       await gmail.stop_watch(await self.integrations.access_token_for(integration))
     except (ReauthRequired, gmail.GmailError) as error:
@@ -69,7 +66,7 @@ class GmailService:
     else:
       logfire.warning("No refresh token for {email}: access not revoked at Google", email=integration.email)
 
-    return await self.repository.delete(integration.id, user_id)
+    return await self.repository.delete(integration.id, integration.user_id)
 
   async def process_notification(self, email: str, history_id: str) -> list[dict]:
     """Lee los mensajes nuevos que anuncia la notificación de Pub/Sub."""
@@ -78,7 +75,7 @@ class GmailService:
       logfire.warning("Notification for {email}: account not connected, ignored", email=email)
       return []  # cuenta desconectada: la notificación llega igual un rato
 
-    integration = await self.renew_watch_if_expiring(integration)
+    # el watch lo renueva el cron diario, aquí solo leemos
     token = await self.integrations.access_token_for(integration)
     start = integration.history_id
     if not start:

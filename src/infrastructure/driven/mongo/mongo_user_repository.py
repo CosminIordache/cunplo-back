@@ -4,7 +4,7 @@ from datetime import datetime, UTC
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from src.domain.user import User
+from src.domain.user import AuthProvider, User
 
 
 def _to_document(user: User) -> dict:
@@ -33,6 +33,14 @@ class MongoUserRepository:
 
   async def get_by_email(self, email: str) -> Optional[User]:
     doc = await self.collection.find_one({"email": email})
+    return _to_user(doc) if doc else None
+
+  async def get_by_auth_account(
+    self, auth_provider: AuthProvider, auth_account_id: str
+  ) -> Optional[User]:
+    doc = await self.collection.find_one(
+      {"auth_provider": auth_provider, "auth_account_id": auth_account_id}
+    )
     return _to_user(doc) if doc else None
 
   async def list(self) -> list[User]:

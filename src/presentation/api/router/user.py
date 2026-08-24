@@ -3,9 +3,13 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from dependency_injector.wiring import inject, Provide
 
 from src.container import Container
+from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
+from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.outlook_service import OutlookService
+from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
+from src.presentation.api.router.integration import disconnect_integration
 from src.infrastructure.utils.security import COOKIE_NAME
 from src.presentation.api.schemas.user import UserUpdate, UserOut
 from src.presentation.middleware.auth import CurrentUser, get_current_user
@@ -20,6 +24,11 @@ router = APIRouter(
 Service = Annotated[UserService, Depends(Provide[Container.user_service])]
 Gmail = Annotated[GmailService, Depends(Provide[Container.gmail_service])]
 Outlook = Annotated[OutlookService, Depends(Provide[Container.outlook_service])]
+Integrations = Annotated[
+  IntegrationService, Depends(Provide[Container.integration_service])
+]
+Contacts = Annotated[ContactService, Depends(Provide[Container.contact_service])]
+Tasks = Annotated[TaskService, Depends(Provide[Container.task_service])]
 
 @router.get("/list", response_model=list[UserOut])
 @inject
@@ -60,6 +69,9 @@ async def update_user(
 async def delete_user(
   id: ObjectIdParam,
   service: Service,
+  integrations: Integrations,
+  contacts: Contacts,
+  tasks: Tasks,
   gmail_service: Gmail,
   outlook_service: Outlook,
   current: CurrentUser,
@@ -68,8 +80,12 @@ async def delete_user(
   if id != current.id:
     raise HTTPException(status.HTTP_403_FORBIDDEN, "not your user")
   # primero las integraciones: si el borrado falla, mejor sobra una revocación que un acceso vivo
-  await gmail_service.disconnect(id)
-  await outlook_service.disconnect(id)
+  for integration in await integrations.list_by_user(id):
+    await disconnect_integration(integration, gmail_service, outlook_service)
+  # ponytail: cascada secuencial sin transacción; si falla a medias quedan huérfanos
+  # por user_id — pasar a una transacción cuando Mongo sea replica set
+  await tasks.delete_all_by_user(id)  # se lleva también los mensajes
+  await contacts.delete_all_by_user(id)
   if not await service.delete(id):
     raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
   response.delete_cookie(COOKIE_NAME, path="/")

@@ -69,6 +69,10 @@ class MongoTaskRepository:
     )
     return _to_task(doc) if doc else None
 
+  async def delete_all_by_user(self, user_id: ObjectId) -> int:
+    result = await self.collection.delete_many({"user_id": user_id})
+    return result.deleted_count
+
   async def delete(self, task_id: ObjectId, user_id: ObjectId) -> bool:
     result = await self.collection.delete_one({"_id": task_id, "user_id": user_id})
     return result.deleted_count == 1

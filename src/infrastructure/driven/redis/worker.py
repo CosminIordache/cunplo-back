@@ -1,5 +1,6 @@
 import os
 import logfire
+from arq import cron
 from arq.connections import RedisSettings, create_pool
 
 from src.infrastructure.driven.redis.functions.process_gmail_notification import (
@@ -8,6 +9,7 @@ from src.infrastructure.driven.redis.functions.process_gmail_notification import
 from src.infrastructure.driven.redis.functions.process_outlook_sync import (
   process_outlook_sync,
 )
+from src.infrastructure.driven.redis.functions.renew_watches import renew_watches
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -60,6 +62,8 @@ class WorkerSettings:
   """Arranca con: uv run arq src.infrastructure.driven.redis.worker.WorkerSettings"""
 
   functions = [process_gmail_notification, process_outlook_sync]
+  # Graph solo da ~3 días de subscription: diario a las 4:00 va sobrado
+  cron_jobs = [cron(renew_watches, hour=4, minute=0)]
   redis_settings = REDIS
   on_startup = startup
   on_shutdown = shutdown
