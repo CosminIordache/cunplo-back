@@ -34,9 +34,15 @@ async def create_indexes(db) -> None:
   )
   # el webhook de Gmail busca por email; no es único, la misma cuenta vale para varios usuarios
   await db["integrations"].create_index([("provider", 1), ("email", 1)])
-  # el webhook de Graph solo trae el id de la subscription; sparse: solo Microsoft lo tiene
+  # el webhook de Graph solo trae el id de la subscription
   # único: con varias cuentas de Microsoft dos filas no pueden compartir subscription
-  await db["integrations"].create_index("subscription_id", unique=True, sparse=True)
+  # parcial y no sparse: el campo existe con null en las filas sin suscripción (Gmail, o
+  # Microsoft antes del primer start_subscription) y sparse solo excluye el campo ausente
+  await db["integrations"].create_index(
+    "subscription_id",
+    unique=True,
+    partialFilterExpression={"subscription_id": {"$type": "string"}},
+  )
   # el id de Gmail solo es único dentro de una cuenta: la pareja evita duplicar
   await db["messages"].create_index([("integration_id", 1), ("provider_id", 1)], unique=True)
   # el hilo se lee ordenado por fecha
