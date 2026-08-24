@@ -28,6 +28,11 @@ def _auth(access_token: str) -> dict:
   return {"Authorization": f"Bearer {access_token}"}
 
 
+# Graph convierte el HTML a texto plano por nosotros, así body queda como el de Gmail.
+# ponytail: sin parsear HTML aquí; si algún día hace falta el HTML original, quitar la cabecera.
+_TEXT_BODY = {"Prefer": 'outlook.body-content-type="text"'}
+
+
 def _address(recipient: dict) -> str:
   """'Nombre <email>' desde la estructura anidada de Graph."""
   address = (recipient or {}).get("emailAddress", {})
@@ -63,7 +68,7 @@ async def _walk(http: httpx.AsyncClient, url: str, access_token: str, params: di
   """Recorre las páginas de un delta y devuelve los mensajes y el deltaLink final."""
   messages: list[dict] = []
   while True:
-    response = await http.get(url, headers=_auth(access_token), params=params)
+    response = await http.get(url, headers=_auth(access_token) | _TEXT_BODY, params=params)
     if response.status_code == 410:
       raise DeltaTooOld  # Graph invalida el token de delta pasado un tiempo
     data = _check(response).json()
