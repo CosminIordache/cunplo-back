@@ -25,5 +25,6 @@ async def list_thread_messages(
   current: CurrentUser,
 ):
   # la cuenta va en la ruta: el mismo thread_id puede existir en dos buzones
-  # el hilo sale ordenado por internal_date; vacío si no es del usuario
-  return await service.list_by_thread_id_user_id(current.id, integration_id, thread_id)
+  # el hilo sale ordenado por internal_date, con los adjuntos de cada correo;
+  # vacío si no es del usuario
+  return await service.list_thread_with_attachments(current.id, integration_id, thread_id)

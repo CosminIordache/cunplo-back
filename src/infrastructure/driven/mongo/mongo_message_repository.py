@@ -1,6 +1,7 @@
 from dataclasses import asdict
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import ReturnDocument
 
 from src.domain.message import Message
 
@@ -25,12 +26,15 @@ class MongoMessageRepository:
     document = _to_document(message)
     document.pop("_id")
     document.pop("created_at")
-    await self.collection.update_one(
+    # devuelve el documento real: si ya existía, el _id es el suyo y no el recién
+    # generado, y los adjuntos cuelgan de ese id
+    updated = await self.collection.find_one_and_update(
       {"integration_id": message.integration_id, "provider_id": message.provider_id},
       {"$set": document, "$setOnInsert": {"_id": message.id, "created_at": message.created_at}},
       upsert=True,
+      return_document=ReturnDocument.AFTER,
     )
-    return message
+    return _to_message(updated)
 
   async def list_by_thread_id_user_id(
     self, user_id: ObjectId, integration_id: ObjectId, thread_id: str

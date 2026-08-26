@@ -7,7 +7,7 @@ INBOX_DELTA = f"{API}/mailFolders/inbox/messages/delta"
 
 # ponytail: solo los campos que guardamos. $select recorta la respuesta y, en delta,
 # evita arrastrar el cuerpo de cada correo en cada página.
-FIELDS = "id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,isDraft"
+FIELDS = "id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,isDraft,hasAttachments"
 
 
 class OutlookError(Exception):
@@ -53,6 +53,9 @@ def _to_message(raw: dict) -> dict:
     # epoch ms como Gmail: es lo que ordena el hilo
     "internal_date": _epoch_ms(raw.get("receivedDateTime")),
     "body": (raw.get("body") or {}).get("content", ""),
+    # el delta no trae los adjuntos, solo si los hay: se piden aparte con list_attachments
+    "has_attachments": bool(raw.get("hasAttachments")),
+    "attachments": [],
   }
 
 
@@ -86,6 +89,43 @@ async def new_messages(access_token: str, delta_link: str) -> tuple[list[dict], 
     raw, marker = await _walk(http, delta_link, access_token)
   # el delta también anuncia borrados y cambios de estado: solo queremos correos nuevos
   return [_to_message(m) for m in raw if "@removed" not in m], marker
+
+
+async def list_attachments(access_token: str, message_id: str) -> list[dict]:
+  """Adjuntos reales del correo, con el mismo shape que gmail._attachments.
+
+  Graph devuelve contentBytes en el propio listado, así que no hace falta una
+  segunda llamada por fichero. Se descartan las imágenes inline (logos de firma)
+  y lo que no sea fileAttachment: un itemAttachment es un correo o cita anidada,
+  no un fichero que se pueda subir tal cual."""
+  async with httpx.AsyncClient(timeout=60, follow_redirects=True) as http:
+    response = await http.get(
+      f"{API}/messages/{message_id}/attachments", headers=_auth(access_token)
+    )
+    data = _check(response).json()
+
+  return [
+    {
+      "attachment_id": raw["id"],
+      "filename": raw.get("name") or raw["id"],
+      "mime_type": raw.get("contentType") or "application/octet-stream",
+      "size": raw.get("size", 0),
+      "content_bytes": raw.get("contentBytes"),  # base64, ya viene en la respuesta
+    }
+    for raw in data.get("value", [])
+    if raw.get("@odata.type") == "#microsoft.graph.fileAttachment"
+    and not raw.get("isInline")
+  ]
+
+
+async def get_attachment(access_token: str, message_id: str, attachment_id: str) -> bytes:
+  """Los bytes de un adjunto suelto. Solo hace falta si no vinieron en list_attachments."""
+  async with httpx.AsyncClient(timeout=60, follow_redirects=True) as http:
+    response = await http.get(
+      f"{API}/messages/{message_id}/attachments/{attachment_id}/$value",
+      headers=_auth(access_token),
+    )
+    return _check(response).content
 
 
 async def subscribe(access_token: str, notification_url: str, secret: str, expires_at: str) -> dict:

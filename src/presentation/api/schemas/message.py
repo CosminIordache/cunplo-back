@@ -2,6 +2,8 @@ from typing import Annotated, Optional
 from datetime import datetime
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
+from src.presentation.api.schemas.attachment import AttachmentOut
+
 
 class MessageOut(BaseModel):
   model_config = ConfigDict(from_attributes=True)
@@ -18,3 +20,5 @@ class MessageOut(BaseModel):
   body: str
   internal_date: int
   created_at: datetime
+  # viven en otra colección: los rellena el router, no el documento de Mongo
+  attachments: list[AttachmentOut] = []

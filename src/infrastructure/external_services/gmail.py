@@ -42,6 +42,28 @@ def _body(payload: dict) -> str:
   return ""
 
 
+def _attachments(payload: dict) -> list[dict]:
+  """Adjuntos reales del mensaje, bajando por las mismas partes MIME que _body.
+
+  Se descartan las imágenes inline (logos de firma, imágenes del HTML): llevan
+  attachmentId igual que un adjunto, pero se repiten en cada correo del mismo
+  remitente y nadie las abre."""
+  found = []
+  if (attachment_id := payload.get("body", {}).get("attachmentId")) and payload.get("filename"):
+    if "attachment" in _header(payload, "content-disposition").lower():
+      found.append(
+        {
+          "attachment_id": attachment_id,
+          "filename": payload["filename"],
+          "mime_type": payload.get("mimeType", "application/octet-stream"),
+          "size": payload.get("body", {}).get("size", 0),
+        }
+      )
+  for part in payload.get("parts", []):
+    found.extend(_attachments(part))
+  return found
+
+
 def _to_message(raw: dict) -> dict:
   payload = raw.get("payload", {})
   return {
@@ -55,6 +77,7 @@ def _to_message(raw: dict) -> dict:
     # el 'Date' de la cabecera lo pone el remitente; este lo pone Gmail
     "internal_date": int(raw["internalDate"]),
     "body": _body(payload),
+    "attachments": _attachments(payload),
   }
 
 
@@ -69,6 +92,18 @@ async def get_message(access_token: str, message_id: str) -> dict:
       raise MessageNotFound(message_id)
     raw = _check(response).json()
     return _to_message(raw)
+
+
+async def get_attachment(access_token: str, message_id: str, attachment_id: str) -> bytes:
+  """Los bytes del adjunto. Gmail los da en base64url dentro del JSON, no como binario."""
+  async with httpx.AsyncClient(timeout=60) as http:
+    response = await http.get(
+      f"{API}/messages/{message_id}/attachments/{attachment_id}",
+      headers=_auth(access_token),
+    )
+    if response.status_code == 404:
+      raise MessageNotFound(message_id)
+    return base64.urlsafe_b64decode(_check(response).json()["data"])
 
 
 async def new_message_ids(access_token: str, start_history_id: str) -> tuple[list[str], str]:

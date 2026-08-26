@@ -95,7 +95,7 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
       logfire.info("Message {message_id} for {email} carries no task, skipped", message_id=message["id"], email=email)
       continue
 
-    await ctx["message_service"].upsert(
+    stored_message = await ctx["message_service"].upsert(
       Message(
         user_id=user_id,
         integration_id=integration.id,
@@ -110,6 +110,9 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
       )
     )
     logfire.info("Message {message_id} saved for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
+
+    # solo los correos que son tarea llevan sus adjuntos al bucket
+    await ctx["attachment_service"].store_for_message(integration, stored_message, message)
 
     await ctx["task_service"].upsert(
       Task(

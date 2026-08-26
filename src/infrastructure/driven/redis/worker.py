@@ -47,6 +47,7 @@ async def startup(ctx) -> None:
   ctx["integration_service"] = await container.integration_service()
   ctx["integration_repository"] = await container.integration_repository()
   ctx["message_service"] = await container.message_service()
+  ctx["attachment_service"] = await container.attachment_service()
   ctx["task_service"] = await container.task_service()
   ctx["contact_service"] = await container.contact_service()
   # sin Resource async detrás: Factory ya devuelve la instancia, no hay que esperarla

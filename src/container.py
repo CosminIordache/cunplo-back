@@ -4,6 +4,7 @@ from dependency_injector import containers, providers
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from src.application.use_cases.agent_service import AgentService
+from src.application.use_cases.attachment_service import AttachmentService
 from src.application.use_cases.auth_service import AuthService
 from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
@@ -12,12 +13,14 @@ from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.message_service import MessageService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.user_service import UserService
+from src.infrastructure.driven.mongo.mongo_attachment_repository import MongoAttachmentRepository
 from src.infrastructure.driven.mongo.mongo_contact_repository import MongoContactRepository
 from src.infrastructure.driven.mongo.mongo_integration_repository import MongoIntegrationRepository
 from src.infrastructure.driven.mongo.mongo_message_repository import MongoMessageRepository
 from src.infrastructure.driven.mongo.mongo_task_repository import MongoTaskRepository
 from src.infrastructure.driven.mongo.mongo_user_repository import MongoUserRepository
 from src.infrastructure.driven.redis.worker import redis_pool
+from src.infrastructure.driven.s3.storage import S3Storage
 from src.infrastructure.external_services.oauth_refresh import refresh_token
 
 
@@ -58,6 +61,11 @@ async def create_indexes(db) -> None:
   await db["tasks"].create_index([("user_id", 1), ("status", 1), ("due_at", 1)])
   # un contacto por usuario y email: el mismo email puede ser cliente de dos usuarios
   await db["contacts"].create_index([("user_id", 1), ("email", 1)], unique=True)
+  # el id del adjunto solo es único dentro de su mensaje: la pareja evita duplicar
+  # al reprocesarse el mismo correo
+  await db["attachments"].create_index([("message_id", 1), ("attachment_id", 1)], unique=True)
+  # el borrado en cascada busca por usuario y por los mensajes del hilo
+  await db["attachments"].create_index([("user_id", 1), ("message_id", 1)])
 
 
 async def mongo_client(uri: str, db_name: str):
@@ -82,6 +90,7 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.api.router.contact",
       "src.presentation.api.router.task",
       "src.presentation.api.router.message",
+      "src.presentation.api.router.attachment",
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
@@ -106,8 +115,33 @@ class Container(containers.DeclarativeContainer):
     IntegrationService, repository=integration_repository, refresh=refresh_token
   )
 
+  # credenciales del bucket de Railway (S3-compatible)
+  config.s3_endpoint.from_env("AWS_ENDPOINT_URL", "")
+  config.s3_region.from_env("AWS_REGION", "auto")
+  config.s3_access_key.from_env("AWS_ACCESS_KEY_ID", "")
+  config.s3_secret_key.from_env("AWS_SECRET_ACCESS_KEY", "")
+  config.s3_bucket.from_env("BUCKET_NAME", "")
+  storage = providers.Singleton(
+    S3Storage,
+    endpoint_url=config.s3_endpoint,
+    region=config.s3_region,
+    access_key=config.s3_access_key,
+    secret_key=config.s3_secret_key,
+    bucket=config.s3_bucket,
+  )
+
+  attachment_repository = providers.Factory(MongoAttachmentRepository, db=db)
+  attachment_service = providers.Factory(
+    AttachmentService,
+    repository=attachment_repository,
+    storage=storage,
+    integrations=integration_service,
+  )
+
   message_repository = providers.Factory(MongoMessageRepository, db=db)
-  message_service = providers.Factory(MessageService, repository=message_repository)
+  message_service = providers.Factory(
+    MessageService, repository=message_repository, attachments=attachment_service
+  )
 
   task_repository = providers.Factory(MongoTaskRepository, db=db)
   task_service = providers.Factory(
