@@ -1,7 +1,8 @@
 from typing import Annotated
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
+from pydantic import AfterValidator
 
 
 def to_object_id(id: str) -> ObjectId:
@@ -13,4 +14,5 @@ def to_object_id(id: str) -> ObjectId:
 
 
 # Úsalo en cualquier ruta con un id de Mongo en el path: `entity_id: ObjectIdParam`
-ObjectIdParam = Annotated[ObjectId, Depends(to_object_id)]
+# Es un validador, no un Depends: así funciona con cualquier nombre de path param.
+ObjectIdParam = Annotated[str, AfterValidator(to_object_id)]

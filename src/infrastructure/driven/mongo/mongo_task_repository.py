@@ -24,7 +24,8 @@ class MongoTaskRepository:
     self.collection = db["tasks"]
 
   async def upsert(self, task: Task) -> Task:
-    """Un hilo, una tarea: el segundo correo del hilo actualiza en vez de duplicar."""
+    """Un hilo, una tarea: el segundo correo del hilo actualiza en vez de duplicar.
+    La cuenta entra en la clave porque el thread_id solo es único dentro de ella."""
     task.updated_at = datetime.now(UTC)
     document = _to_document(task)
     document.pop("_id")
@@ -33,7 +34,11 @@ class MongoTaskRepository:
     # nuevo, y los de correos anteriores del hilo ya no vuelven a salir.
     contact_ids = document.pop("contact_ids")
     doc = await self.collection.find_one_and_update(
-      {"user_id": task.user_id, "thread_id": task.thread_id},
+      {
+        "user_id": task.user_id,
+        "integration_id": task.integration_id,
+        "thread_id": task.thread_id,
+      },
       {
         "$set": document,
         "$addToSet": {"contact_ids": {"$each": contact_ids}},
@@ -48,8 +53,12 @@ class MongoTaskRepository:
     doc = await self.collection.find_one({"_id": task_id, "user_id": user_id})
     return _to_task(doc) if doc else None
 
-  async def get_by_thread(self, user_id: ObjectId, thread_id: str) -> Optional[Task]:
-    doc = await self.collection.find_one({"user_id": user_id, "thread_id": thread_id})
+  async def get_by_thread(
+    self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
+  ) -> Optional[Task]:
+    doc = await self.collection.find_one(
+      {"user_id": user_id, "integration_id": integration_id, "thread_id": thread_id}
+    )
     return _to_task(doc) if doc else None
 
   async def get_by_user(self, user_id: ObjectId, status: Optional[Status] = None) -> list[Task]:

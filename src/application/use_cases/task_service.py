@@ -18,8 +18,10 @@ class TaskService:
   async def get(self, task_id: ObjectId, user_id: ObjectId) -> Optional[Task]:
     return await self.repository.get(task_id, user_id)
 
-  async def get_by_thread(self, user_id: ObjectId, thread_id: str) -> Optional[Task]:
-    return await self.repository.get_by_thread(user_id, thread_id)
+  async def get_by_thread(
+    self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
+  ) -> Optional[Task]:
+    return await self.repository.get_by_thread(user_id, integration_id, thread_id)
 
   async def get_by_user(self, user_id: ObjectId, status: Optional[Status] = None) -> list[Task]:
     return await self.repository.get_by_user(user_id, status)
@@ -33,7 +35,10 @@ class TaskService:
     if not task:
       return False
 
-    deleted = await self.messages.delete_by_thread(user_id, task.thread_id)
+    # la tarea ya sabe de qué buzón sale: solo caen los correos de esa cuenta
+    deleted = await self.messages.delete_by_thread(
+      user_id, task.integration_id, task.thread_id
+    )
     logfire.info(
       "Task {task_id} deleted with {deleted} messages of thread {thread_id}",
       task_id=task_id,

@@ -87,6 +87,8 @@ The two job modules (`process_gmail_notification.py`, `process_outlook_sync.py`)
 
 `AgentService` (pydantic-ai, OpenAI) decides in one call whether a thread carries a task and returns `ExtractedTask | None`. The rules live in the `INSTRUCTIONS` prompt in `agent_service.py` — that prompt is the specification of what a task is, so behaviour changes belong there, not in the callers. **One thread, at most one task**, backed by a unique index; a later mail in the thread re-`upsert`s it. Only messages that produced a task are stored, and deleting a task deletes its thread's messages.
 
+A `thread_id` is only unique **within one mailbox**, so every per-thread key and filter carries `integration_id` alongside `user_id`: the unique index on `tasks` is `(user_id, integration_id, thread_id)`, and `messages.list_by_thread_id_user_id` / `delete_by_thread` filter on all three. Without it two accounts of the same user sharing a `thread_id` would collapse into one task. This mirrors `messages`, whose unique key has always been `(integration_id, provider_id)`. `GET /messages/thread/{integration_id}/{thread_id}` takes the account in the path for the same reason.
+
 Push expires on both sides (Gmail 7 days, Graph ~3). The daily `renew_watches` cron at 04:00 renews everything expiring soon, per provider, and a broken account is logged and skipped rather than aborting the run. `list_expiring` also picks up rows with a null `watch_expires_at`, so an account that failed to start push gets retried.
 
 ### Config
@@ -108,7 +110,9 @@ Mirror an existing slice across all five layers: domain dataclass → port Proto
 
 ## Tests
 
-`asyncio_mode = "auto"` — async tests need no marker. **`tests/` is currently empty** (only a stale `__pycache__`); the fixtures described below are gone. If you add tests back, the shape that worked was: no database and no network, a root `client` fixture applying `provider.override(...)` around a `TestClient` from a per-entity `overrides` dict, in-memory fakes for the repositories, and `monkeypatch.setattr` on the `gmail` / `outlook` modules (patch the module attribute, not the import inside the service).
+`asyncio_mode = "auto"` — async tests need no marker. The suite was deleted at some point; the only file left is `tests/tasks/test_task_key.py`, which pins the `(user_id, integration_id, thread_id)` task key with in-memory fakes and no conftest.
+
+If you add more tests, the shape that worked before was: no database and no network, a root `client` fixture applying `provider.override(...)` around a `TestClient` from a per-entity `overrides` dict, in-memory fakes for the repositories, and `monkeypatch.setattr` on the `gmail` / `outlook` modules (patch the module attribute, not the import inside the service).
 
 Importing `src.main` runs `load_dotenv()`, so `.env` must hold a valid `JWT_SECRET` and `ENCRYPTION_KEY` or collection fails at import, before any test runs.
 

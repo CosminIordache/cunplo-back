@@ -80,7 +80,9 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
     for message in messages:
       thread_id = message["thread_id"]
       logfire.info("Processing message {message_id} for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
-      stored = await ctx["message_service"].list_by_thread_id_user_id(user_id, thread_id)
+      stored = await ctx["message_service"].list_by_thread_id_user_id(
+        user_id, integration.id, thread_id
+      )
 
       extracted = await ctx["agent_service"].run_tasks(
         owner_email=email,
@@ -111,6 +113,7 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
       await ctx["task_service"].upsert(
         Task(
           user_id=user_id,
+          integration_id=integration.id,
           thread_id=thread_id,
           title=extracted.title,
           status=extracted.status,

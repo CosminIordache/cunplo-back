@@ -45,10 +45,15 @@ async def create_indexes(db) -> None:
   )
   # el id de Gmail solo es único dentro de una cuenta: la pareja evita duplicar
   await db["messages"].create_index([("integration_id", 1), ("provider_id", 1)], unique=True)
-  # el hilo se lee ordenado por fecha
-  await db["messages"].create_index([("user_id", 1), ("thread_id", 1), ("internal_date", 1)])
-  # la regla: un hilo, una tarea
-  await db["tasks"].create_index([("user_id", 1), ("thread_id", 1)], unique=True)
+  # el hilo se lee ordenado por fecha, acotado a la cuenta
+  await db["messages"].create_index(
+    [("user_id", 1), ("integration_id", 1), ("thread_id", 1), ("internal_date", 1)]
+  )
+  # la regla: un hilo, una tarea. La cuenta entra en la clave porque el thread_id
+  # solo es único dentro de ella, igual que el provider_id en messages
+  await db["tasks"].create_index(
+    [("user_id", 1), ("integration_id", 1), ("thread_id", 1)], unique=True
+  )
   # las tres columnas de la app: tareas del usuario por estado
   await db["tasks"].create_index([("user_id", 1), ("status", 1), ("due_at", 1)])
   # un contacto por usuario y email: el mismo email puede ser cliente de dos usuarios

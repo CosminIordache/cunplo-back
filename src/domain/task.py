@@ -17,6 +17,7 @@ class Status(StrEnum):
 class Task:
 
   user_id: ObjectId
+  integration_id: ObjectId  # de qué buzón sale: el thread_id solo es único dentro de la cuenta
   thread_id: str
   title: str
   status: Status

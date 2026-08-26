@@ -32,8 +32,13 @@ class MongoMessageRepository:
     )
     return message
 
-  async def list_by_thread_id_user_id(self, user_id: ObjectId, thread_id: str) -> list[Message]:
-    cursor = self.collection.find({"user_id": user_id, "thread_id": thread_id})
+  async def list_by_thread_id_user_id(
+    self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
+  ) -> list[Message]:
+    # la cuenta acota el hilo: el mismo thread_id puede existir en dos buzones
+    cursor = self.collection.find(
+      {"user_id": user_id, "integration_id": integration_id, "thread_id": thread_id}
+    )
     return [_to_message(d) async for d in cursor.sort("internal_date", 1)]
 
   async def delete(self, message_id: ObjectId, user_id: ObjectId) -> bool:
@@ -44,6 +49,10 @@ class MongoMessageRepository:
     result = await self.collection.delete_many({"user_id": user_id})
     return result.deleted_count
 
-  async def delete_by_thread(self, user_id: ObjectId, thread_id: str) -> int:
-    result = await self.collection.delete_many({"user_id": user_id, "thread_id": thread_id})
+  async def delete_by_thread(
+    self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
+  ) -> int:
+    result = await self.collection.delete_many(
+      {"user_id": user_id, "integration_id": integration_id, "thread_id": thread_id}
+    )
     return result.deleted_count
