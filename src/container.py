@@ -12,12 +12,14 @@ from src.application.use_cases.outlook_service import OutlookService
 from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.message_service import MessageService
 from src.application.use_cases.task_service import TaskService
+from src.application.use_cases.usage_service import UsageService
 from src.application.use_cases.user_service import UserService
 from src.infrastructure.driven.mongo.mongo_attachment_repository import MongoAttachmentRepository
 from src.infrastructure.driven.mongo.mongo_contact_repository import MongoContactRepository
 from src.infrastructure.driven.mongo.mongo_integration_repository import MongoIntegrationRepository
 from src.infrastructure.driven.mongo.mongo_message_repository import MongoMessageRepository
 from src.infrastructure.driven.mongo.mongo_task_repository import MongoTaskRepository
+from src.infrastructure.driven.mongo.mongo_usage_repository import MongoUsageRepository
 from src.infrastructure.driven.mongo.mongo_user_repository import MongoUserRepository
 from src.infrastructure.driven.redis.worker import redis_pool
 from src.infrastructure.driven.s3.storage import S3Storage
@@ -66,6 +68,8 @@ async def create_indexes(db) -> None:
   await db["attachments"].create_index([("message_id", 1), ("attachment_id", 1)], unique=True)
   # el borrado en cascada busca por usuario y por los mensajes del hilo
   await db["attachments"].create_index([("user_id", 1), ("message_id", 1)])
+  # el gasto se suma por usuario, normalmente acotado a un periodo
+  await db["usages"].create_index([("user_id", 1), ("created_at", -1)])
 
 
 async def mongo_client(uri: str, db_name: str):
@@ -151,7 +155,10 @@ class Container(containers.DeclarativeContainer):
   contact_repository = providers.Factory(MongoContactRepository, db=db)
   contact_service = providers.Factory(ContactService, repository=contact_repository)
 
-  agent_service = providers.Factory(AgentService)
+  usage_repository = providers.Factory(MongoUsageRepository, db=db)
+  usage_service = providers.Factory(UsageService, repository=usage_repository)
+
+  agent_service = providers.Factory(AgentService, usage_service=usage_service)
 
   # vacío desactiva el push de Outlook, como PUBSUB_TOPIC con Gmail
   config.graph_notification_url.from_env("GRAPH_NOTIFICATION_URL", "")

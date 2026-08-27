@@ -3,8 +3,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, List
 
+from bson import ObjectId
 from pydantic_ai import Agent
 
+from src.application.use_cases.usage_service import UsageService
 from src.domain.task import Status
 
 @dataclass
@@ -66,14 +68,15 @@ Si dudas de quién es la acción, usa TO_VALIDATE en vez de adivinar.
 
 
 class AgentService:
-  def __init__(self):
+  def __init__(self, usage_service: UsageService):
+    self.usage_service = usage_service
     self.agent = Agent(
       model= "openai:gpt-5.6-luna",
       output_type=ExtractedTask | None,
       instructions=INSTRUCTIONS
      )
-    
-  async def run_tasks(self, owner_email: str, thread_messages: Optional[List[AgentEmailMessage]], new_message: AgentEmailMessage) -> Optional[ExtractedTask]:
+
+  async def run_tasks(self, user_id: ObjectId, owner_email: str, thread_messages: Optional[List[AgentEmailMessage]], new_message: AgentEmailMessage) -> Optional[ExtractedTask]:
     logfire.info(
       "Agent analyzing thread {thread_id} ({previous} previous mails) from {sender} for owner {owner}",
       thread_id=new_message.thread_id,
@@ -82,6 +85,8 @@ class AgentService:
       owner=owner_email,
     )
     result = await self.agent.run(self._prompt(owner_email, thread_messages, new_message))
+    
+    await self.usage_service.record(user_id, self.agent.model.model_name, result)
 
     usage = result.usage
     if not result.output:

@@ -85,6 +85,7 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
       )
 
       extracted = await ctx["agent_service"].run_tasks(
+        user_id=user_id,
         owner_email=email,
         thread_messages=[_stored_to_agent_message(m) for m in stored] or None,
         new_message=_to_agent_message(message),

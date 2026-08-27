@@ -51,7 +51,8 @@ async def startup(ctx) -> None:
   ctx["task_service"] = await container.task_service()
   ctx["contact_service"] = await container.contact_service()
   # sin Resource async detrás: Factory ya devuelve la instancia, no hay que esperarla
-  ctx["agent_service"] = container.agent_service()
+  # ya no es libre de Mongo: escribe el usage, así que hay que esperar al Resource
+  ctx["agent_service"] = await container.agent_service()
   logfire.info("ARQ worker started!")
 
 
