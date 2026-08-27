@@ -56,6 +56,8 @@ Campos:
   Descarta buzones genéricos y automáticos: info@, noreply@, no-reply@, ventas@, soporte@,
   hola@, admin@, facturacion@, newsletter@ y similares. Solo personas.
 - due_at: solo cuando el hilo da una fecha concreta. Nunca la inventes ni la estimes.
+  Resuelve las fechas relativas ("mañana", "la semana que viene", "el viernes") contra la
+  FECHA DE HOY que te dan al principio del prompt, tomando como referencia el correo nuevo.
 
 El estado describe cómo queda el hilo tras el correo nuevo, no cómo estaba antes. Un hilo
 cerrado se reabre si el correo nuevo pide algo más: el presupuesto que enviaste lo dejó en
@@ -118,7 +120,9 @@ class AgentService:
 
     context = "\n\n---\n\n".join(self._format(m) for m in thread_messages or [])
     return (
-      f"DUEÑO DEL BUZÓN: {owner_email}"
+      # ponytail: hoy = ahora del worker, no la fecha real del correo; pasar received_at si el retraso importa
+      f"FECHA DE HOY: {datetime.now().astimezone().strftime('%A %Y-%m-%d %H:%M %Z')}"
+      f"\nDUEÑO DEL BUZÓN: {owner_email}"
       f"\n\nHILO PREVIO (contexto):\n\n{context or '(no hay correos previos)'}"
       f"\n\n=== CORREO NUEVO ===\n\n{self._format(new_message)}"
     )
