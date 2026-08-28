@@ -1,5 +1,7 @@
 from typing import Optional
 
+from pydantic_extra_types.timezone_name import TimeZoneName
+
 from src.domain.user import AuthProvider, User
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
 from src.infrastructure.utils.security import create_token, verify_password
@@ -36,7 +38,7 @@ class AuthService:
     if user:
       # la foto puede cambiar en el proveedor: la refrescamos en cada login
       if picture and picture != user.picture:
-        user = await self.users.update(user.id, {"picture": picture})
+        user = await self.users.update(user.id, {"picture": picture}) or user
     else:
       # primera vez con este proveedor: si el email ya existe, vinculamos en vez de duplicar
       user = await self.users.get_by_email(claims["email"])
@@ -44,7 +46,8 @@ class AuthService:
         changes = {"auth_provider": auth_provider, "auth_account_id": claims["sub"]}
         if picture:
           changes["picture"] = picture
-        user = await self.users.update(user.id, changes)
+        
+        user = await self.users.update(user.id, changes) or user
       else:
         user = await self.users.create(
           User(
@@ -52,7 +55,7 @@ class AuthService:
             email=claims["email"],
             password=None,
             phone=None,
-            timezone="UTC",
+            timezone=TimeZoneName("UTC"),
             language=claims.get("locale", "en").split("-")[0],
             picture=picture,
             auth_provider=auth_provider,
