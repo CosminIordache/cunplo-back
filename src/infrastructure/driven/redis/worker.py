@@ -41,18 +41,19 @@ async def startup(ctx) -> None:
   container = Container()
   await container.init_resources()
   ctx["container"] = container
-  # los providers dependen de un Resource async (el cliente de Mongo): hay que esperarlos
-  ctx["gmail_service"] = await container.gmail_service()
-  ctx["outlook_service"] = await container.outlook_service()
-  ctx["integration_service"] = await container.integration_service()
-  ctx["integration_repository"] = await container.integration_repository()
-  ctx["message_service"] = await container.message_service()
-  ctx["attachment_service"] = await container.attachment_service()
-  ctx["task_service"] = await container.task_service()
-  ctx["contact_service"] = await container.contact_service()
-  # sin Resource async detrás: Factory ya devuelve la instancia, no hay que esperarla
-  # ya no es libre de Mongo: escribe el usage, así que hay que esperar al Resource
-  ctx["agent_service"] = await container.agent_service()
+
+  for name in (
+    "gmail_service",
+    "outlook_service",
+    "integration_service",
+    "integration_repository",
+    "message_service",
+    "attachment_service",
+    "task_service",
+    "contact_service",
+    "agent_service",
+  ):
+    ctx[name] = await getattr(container, name)()
   logfire.info("ARQ worker started!")
 
 

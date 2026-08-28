@@ -33,7 +33,7 @@ def _auth(access_token: str) -> dict:
 _TEXT_BODY = {"Prefer": 'outlook.body-content-type="text"'}
 
 
-def _address(recipient: dict) -> str:
+def _address(recipient: dict | None) -> str:
   """'Nombre <email>' desde la estructura anidada de Graph."""
   address = (recipient or {}).get("emailAddress", {})
   name, email = address.get("name", ""), address.get("address", "")

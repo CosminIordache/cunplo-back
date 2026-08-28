@@ -11,6 +11,8 @@ uv sync                                   # install deps (incl. dev group)
 uv run python -m src.main                 # API (uvicorn, reload, uvloop/httptools)
 uv run arq src.infrastructure.driven.redis.worker.WorkerSettings   # background worker
 uv run pytest                             # tests (see Tests below — the suite is currently empty)
+uv run --env-file .env.dev arq src.infrastructure.driven.redis.worker.WorkerSettings    # Worker with env dev
+uv run --env-file .env.dev python -m src.main # API with env dev
 ```
 
 Two processes: the FastAPI app **and** the arq worker. The API only enqueues; every mail is

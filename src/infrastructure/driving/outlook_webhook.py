@@ -5,13 +5,15 @@ import logfire
 from dependency_injector.wiring import inject, Provide
 from fastapi import APIRouter, Depends, Request, Response, status
 
+from arq import ArqRedis
+
+from src.application.ports.integration_repository import IntegrationRepository
 from src.container import Container
-from src.domain.integration import Provider
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
-Queue = Annotated[object, Depends(Provide[Container.queue])]
-Repository = Annotated[object, Depends(Provide[Container.integration_repository])]
+Queue = Annotated[ArqRedis, Depends(Provide[Container.queue])]
+Repository = Annotated[IntegrationRepository, Depends(Provide[Container.integration_repository])]
 
 
 @router.post("/outlook")

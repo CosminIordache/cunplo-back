@@ -1,6 +1,4 @@
 import base64
-from typing import Optional
-import logfire
 import httpx
 
 API = "https://gmail.googleapis.com/gmail/v1/users/me"

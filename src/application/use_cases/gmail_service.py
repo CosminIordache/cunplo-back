@@ -1,8 +1,6 @@
 import logfire
 from datetime import datetime, timedelta, UTC
 
-from bson import ObjectId
-
 from src.domain.integration import Integration, Provider
 from src.application.ports.integration_repository import IntegrationRepository
 from src.application.use_cases.integration_service import IntegrationService, ReauthRequired

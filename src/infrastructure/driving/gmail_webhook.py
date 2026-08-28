@@ -3,6 +3,7 @@ import json
 import os
 from typing import Annotated
 
+from arq import ArqRedis
 from dependency_injector.wiring import inject, Provide
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
@@ -10,7 +11,7 @@ from src.container import Container
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
-Queue = Annotated[object, Depends(Provide[Container.queue])]
+Queue = Annotated[ArqRedis, Depends(Provide[Container.queue])]
 
 
 @router.post("/gmail")

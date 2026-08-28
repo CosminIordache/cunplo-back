@@ -16,8 +16,6 @@ from src.infrastructure.external_services.microsoft_oauth import (
 from src.domain.user import AuthProvider, User
 from src.application.use_cases.auth_service import (
   AuthService,
-  EmailAlreadyUsed,
-  InvalidCredentials,
 )
 from src.infrastructure.utils.security import COOKIE_DOMAIN, COOKIE_NAME, set_session_cookie
 from src.presentation.api.schemas.auth import LoginIn, RegisterIn, SessionOut
