@@ -20,6 +20,7 @@ class UserOut(BaseModel):
   id: Annotated[str, BeforeValidator(str)]  # ObjectId -> str
   username: str
   email: EmailStr
+  picture: Optional[str] = None
   phone: Optional[str] = None
   timezone: str
   language: str

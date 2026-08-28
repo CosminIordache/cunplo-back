@@ -22,6 +22,10 @@ class User:
   timezone: TimeZoneName
   language: LanguageAlpha2
 
+  # ponytail: URL del proveedor, no la copiamos a storage propio. Microsoft no la da
+  # (Graph solo sirve /me/photo/$value binario), así que ahí queda None.
+  picture: Optional[str] = None
+
   # con quién entra: el 'sub' es la identidad, el email puede cambiar o repetirse
   auth_provider: Optional[AuthProvider] = None
   auth_account_id: Optional[str] = None
