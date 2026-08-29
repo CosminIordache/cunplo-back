@@ -63,9 +63,9 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
   """El job que el worker desencola: analiza los correos nuevos de una cuenta de
   Outlook y guarda los que son tarea. Lo encola el webhook de Graph."""
   # arq serializa el job: el ObjectId viaja como str y aquí se reconstruye
-  integration_id, user_id = ObjectId(integration_id), ObjectId(user_id)
+  integration_oid, user_oid = ObjectId(integration_id), ObjectId(user_id)
   with logfire.span("process_outlook_sync {integration_id}", integration_id=integration_id) as span:
-    integration = await ctx["integration_repository"].get(integration_id, user_id)
+    integration = await ctx["integration_repository"].get(integration_oid, user_oid)
     if not integration:
       logfire.warning("Integration {integration_id} is gone, sync skipped", integration_id=integration_id)
       return
@@ -81,11 +81,11 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
       thread_id = message["thread_id"]
       logfire.info("Processing message {message_id} for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
       stored = await ctx["message_service"].list_by_thread_id_user_id(
-        user_id, integration.id, thread_id
+        user_oid, integration.id, thread_id
       )
 
       extracted = await ctx["agent_service"].run_tasks(
-        user_id=user_id,
+        user_id=user_oid,
         owner_email=email,
         thread_messages=[_stored_to_agent_message(m) for m in stored] or None,
         new_message=_to_agent_message(message),
@@ -97,7 +97,7 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
 
       stored_message = await ctx["message_service"].upsert(
         Message(
-          user_id=user_id,
+          user_id=user_oid,
           integration_id=integration.id,
           provider_id=message["id"],
           thread_id=thread_id,
@@ -116,13 +116,13 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
 
       await ctx["task_service"].upsert(
         Task(
-          user_id=user_id,
+          user_id=user_oid,
           integration_id=integration.id,
           thread_id=thread_id,
           title=extracted.title,
           status=extracted.status,
           due_at=extracted.due_at,
-          contact_ids=await _resolve_contacts(ctx, user_id, email, extracted.contacts),
+          contact_ids=await _resolve_contacts(ctx, user_oid, email, extracted.contacts),
         )
       )
       logfire.info("Task upserted for thread {thread_id} (user {user_id})", thread_id=thread_id, user_id=user_id)
