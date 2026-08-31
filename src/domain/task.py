@@ -13,6 +13,13 @@ class Status(StrEnum):
   DONE = "done"
 
 
+class Priority(StrEnum):
+  LOW = "low"
+  MEDIUM = "medium"
+  HIGH = "high"
+  URGENT = "urgent"
+
+
 @dataclass
 class Task:
 
@@ -24,6 +31,7 @@ class Task:
  
   contact_ids: List[ObjectId] = field(default_factory=list)
   due_at: Optional[datetime] = None  # None cuando el correo no dice fecha
+  priority: Optional[Priority] = None
 
   id: ObjectId = field(default_factory=ObjectId)
   created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

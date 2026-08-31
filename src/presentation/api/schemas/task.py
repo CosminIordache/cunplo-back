@@ -2,13 +2,14 @@ from typing import Annotated, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
-from src.domain.task import Status
+from src.domain.task import Priority, Status
 
 
 class TaskUpdate(BaseModel):
   title: Optional[str] = None
   status: Optional[Status] = None
   due_at: Optional[datetime] = None
+  priority: Optional[Priority] = None
 
 
 class TaskOut(BaseModel):
@@ -22,5 +23,6 @@ class TaskOut(BaseModel):
   status: Status
   contact_ids: List[Annotated[str, BeforeValidator(str)]] = []
   due_at: Optional[datetime] = None
+  priority: Optional[Priority] = None
   created_at: datetime
   updated_at: datetime
