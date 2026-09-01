@@ -14,6 +14,9 @@ class ContactService:
     self.repository = repository
 
   async def create(self, contact: Contact) -> Contact:
+    # el email se guarda y se busca siempre en minúsculas: la query de Mongo distingue
+    # mayúsculas y el mismo buzón llega escrito de cualquier forma
+    contact.email = contact.email.lower()
     if await self.repository.get_by_email(contact.user_id, contact.email):
       raise ContactEmailAlreadyUsed
     return await self.repository.create(contact)
@@ -22,13 +25,14 @@ class ContactService:
     return await self.repository.get(contact_id, user_id)
 
   async def get_by_email(self, user_id: ObjectId, email: str) -> Optional[Contact]:
-    return await self.repository.get_by_email(user_id, email)
+    return await self.repository.get_by_email(user_id, email.lower())
 
   async def get_by_user(self, user_id: ObjectId, search: Optional[str] = None) -> list[Contact]:
     return await self.repository.get_by_user(user_id, search)
 
   async def update(self, contact_id: ObjectId, user_id: ObjectId, changes: dict) -> Optional[Contact]:
     if "email" in changes:
+      changes["email"] = changes["email"].lower()
       owner = await self.repository.get_by_email(user_id, changes["email"])
       if owner and owner.id != contact_id:
         raise ContactEmailAlreadyUsed

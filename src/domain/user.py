@@ -26,6 +26,9 @@ class User:
   # (Graph solo sirve /me/photo/$value binario), así que ahí queda None.
   picture: Optional[str] = None
 
+  # si está activo solo se analizan los correos cuyo remitente ya es contacto del usuario
+  only_contacts: bool = False
+
   # con quién entra: el 'sub' es la identidad, el email puede cambiar o repetirse
   auth_provider: Optional[AuthProvider] = None
   auth_account_id: Optional[str] = None

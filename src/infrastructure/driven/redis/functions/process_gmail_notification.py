@@ -1,6 +1,7 @@
 import logfire
 
 from src.application.use_cases.agent_service import AgentEmailMessage
+from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact
 from src.application.use_cases.contact_service import ContactEmailAlreadyUsed
 from src.domain.contact import Contact
 from src.domain.integration import Provider
@@ -78,9 +79,17 @@ async def process_gmail_notification(ctx, email: str, history_id: str) -> None:
 
 
 async def _process_messages(ctx, messages, email, user_id, integration) -> None:
+  user = await ctx["user_service"].get(user_id)
+  only_contacts = bool(user and user.only_contacts)
+
   for message in messages:
     thread_id = message["thread_id"]
     logfire.info("Processing message {message_id} for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
+
+    if only_contacts and not await is_known_contact(ctx, user_id, message["sender"]):
+      logfire.info("Message {message_id} from a non-contact, skipped", message_id=message["id"], email=email)
+      continue
+
     stored = await ctx["message_service"].list_by_thread_id_user_id(
       user_id, integration.id, thread_id
     )

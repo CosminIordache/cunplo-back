@@ -3,6 +3,7 @@ import logfire
 from bson import ObjectId
 
 from src.application.use_cases.agent_service import AgentEmailMessage
+from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact
 from src.application.use_cases.contact_service import ContactEmailAlreadyUsed
 from src.domain.contact import Contact
 from src.domain.message import Message
@@ -77,9 +78,17 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
       logfire.info("No new Outlook messages for {email}", email=email)
       return
 
+    user = await ctx["user_service"].get(user_oid)
+    only_contacts = bool(user and user.only_contacts)
+
     for message in messages:
       thread_id = message["thread_id"]
       logfire.info("Processing message {message_id} for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
+
+      if only_contacts and not await is_known_contact(ctx, user_oid, message["sender"]):
+        logfire.info("Message {message_id} from a non-contact, skipped", message_id=message["id"], email=email)
+        continue
+
       stored = await ctx["message_service"].list_by_thread_id_user_id(
         user_oid, integration.id, thread_id
       )
