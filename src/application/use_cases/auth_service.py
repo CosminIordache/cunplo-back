@@ -36,15 +36,15 @@ class AuthService:
     picture = claims.get("picture")
 
     if user:
-      # la foto puede cambiar en el proveedor: la refrescamos en cada login
-      if picture and picture != user.picture:
+      # solo ponemos la del proveedor si el usuario no tiene foto: no pisamos la suya
+      if picture and not user.picture:
         user = await self.users.update(user.id, {"picture": picture}) or user
     else:
       # primera vez con este proveedor: si el email ya existe, vinculamos en vez de duplicar
       user = await self.users.get_by_email(claims["email"])
       if user:
         changes = {"auth_provider": auth_provider, "auth_account_id": claims["sub"]}
-        if picture:
+        if picture and not user.picture:
           changes["picture"] = picture
         
         user = await self.users.update(user.id, changes) or user
