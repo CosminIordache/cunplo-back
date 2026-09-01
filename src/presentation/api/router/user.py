@@ -7,6 +7,7 @@ from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.outlook_service import OutlookService
+from src.application.use_cases.subscription_service import SubscriptionService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
 from src.presentation.api.router.integration import disconnect_integration
@@ -29,6 +30,9 @@ Integrations = Annotated[
 ]
 Contacts = Annotated[ContactService, Depends(Provide[Container.contact_service])]
 Tasks = Annotated[TaskService, Depends(Provide[Container.task_service])]
+Subscriptions = Annotated[
+  SubscriptionService, Depends(Provide[Container.subscription_service])
+]
 
 @router.get("/list", response_model=list[UserOut])
 @inject
@@ -100,6 +104,7 @@ async def delete_user(
   integrations: Integrations,
   contacts: Contacts,
   tasks: Tasks,
+  subscriptions: Subscriptions,
   gmail_service: Gmail,
   outlook_service: Outlook,
   current: CurrentUser,
@@ -114,6 +119,7 @@ async def delete_user(
   # por user_id — pasar a una transacción cuando Mongo sea replica set
   await tasks.delete_all_by_user(id)  # se lleva también los mensajes
   await contacts.delete_all_by_user(id)
+  await subscriptions.delete_by_user(id)
   if not await service.delete(id):
     raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
   response.delete_cookie(COOKIE_NAME, path="/")

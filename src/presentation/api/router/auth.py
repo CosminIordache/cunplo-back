@@ -17,6 +17,7 @@ from src.domain.user import AuthProvider, User
 from src.application.use_cases.auth_service import (
   AuthService,
 )
+from src.application.use_cases.subscription_service import SubscriptionService
 from src.infrastructure.utils.security import COOKIE_DOMAIN, COOKIE_NAME, set_session_cookie
 from src.presentation.api.schemas.auth import LoginIn, RegisterIn, SessionOut
 from src.presentation.api.schemas.user import UserOut
@@ -25,6 +26,9 @@ from src.presentation.middleware.auth import CurrentUser
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 Service = Annotated[AuthService, Depends(Provide[Container.auth_service])]
+Subscriptions = Annotated[
+  SubscriptionService, Depends(Provide[Container.subscription_service])
+]
 
 
 # @router.post(
@@ -71,13 +75,17 @@ async def google_login(request: Request):
 
 @router.get("/google/callback", name="google_callback")
 @inject
-async def google_callback(request: Request, service: Service):
+async def google_callback(
+  request: Request, service: Service, subscriptions: Subscriptions
+):
   try:
     token = await google.authorize_access_token(request)
   except OAuthError:
     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "google auth failed")
 
-  _, jwt_token = await service.login_oauth(AuthProvider.GOOGLE, token["userinfo"])
+  user, jwt_token = await service.login_oauth(AuthProvider.GOOGLE, token["userinfo"])
+  # idempotente: solo abre el trial la primera vez que entra
+  await subscriptions.start_trial(user.id)
 
   redirect = RedirectResponse(os.getenv("FRONTEND_REDIRECT", "/"))
   set_session_cookie(redirect, jwt_token)
@@ -94,7 +102,9 @@ async def microsoft_login(request: Request):
 
 @router.get("/microsoft/callback", name="microsoft_callback")
 @inject
-async def microsoft_callback(request: Request, service: Service):
+async def microsoft_callback(
+  request: Request, service: Service, subscriptions: Subscriptions
+):
   try:
     token = await microsoft.authorize_access_token(request, claims_options=CLAIMS_OPTIONS)
   except OAuthError:
@@ -103,9 +113,10 @@ async def microsoft_callback(request: Request, service: Service):
   claims = token["userinfo"]
   # las cuentas personales no siempre traen 'email': 'preferred_username' es el fallback
   email = claims.get("email") or claims["preferred_username"]
-  _, jwt_token = await service.login_oauth(
+  user, jwt_token = await service.login_oauth(
     AuthProvider.MICROSOFT, {**claims, "email": email}
   )
+  await subscriptions.start_trial(user.id)
 
   redirect = RedirectResponse(os.getenv("FRONTEND_REDIRECT", "/"))
   set_session_cookie(redirect, jwt_token)

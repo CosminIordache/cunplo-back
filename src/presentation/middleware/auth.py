@@ -8,8 +8,9 @@ from fastapi import Cookie, Depends, HTTPException, status
 from joserfc.errors import JoseError
 
 from src.container import Container
-from src.domain.user import User
+from src.domain.user import Role, User
 from src.application.use_cases.auth_service import AuthService
+from src.application.use_cases.subscription_service import SubscriptionService
 from src.infrastructure.utils.security import COOKIE_NAME, decode_token
 
 
@@ -32,3 +33,34 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_admin_user(user: CurrentUser) -> User:
+  if user.role != Role.ADMIN:
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "admin only")
+  return user
+
+
+AdminUser = Annotated[User, Depends(get_admin_user)]
+
+
+@inject
+async def require_active_subscription(
+  user: CurrentUser,
+  subscriptions: Annotated[
+    SubscriptionService, Depends(Provide[Container.subscription_service])
+  ],
+) -> User:
+  """Puerta de pago: 402 si el trial caducó y no hay plan vivo.
+  Los admins pasan siempre, para poder mirar la casa por dentro."""
+  if user.role == Role.ADMIN:
+    return user
+  subscription = await subscriptions.get_by_user(user.id)
+  if not subscription or not subscription.is_active:
+    raise HTTPException(
+      status.HTTP_402_PAYMENT_REQUIRED, "subscription expired"
+    )
+  return user
+
+
+SubscribedUser = Annotated[User, Depends(require_active_subscription)]

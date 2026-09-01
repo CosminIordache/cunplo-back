@@ -13,6 +13,11 @@ class AuthProvider(StrEnum):
   MICROSOFT = "microsoft"
 
 
+class Role(StrEnum):
+  USER = "user"
+  ADMIN = "admin"
+
+
 @dataclass
 class User:
   username: str
@@ -28,6 +33,8 @@ class User:
 
   # si está activo solo se analizan los correos cuyo remitente ya es contacto del usuario
   only_contacts: bool = False
+
+  role: Role = Role.USER
 
   # con quién entra: el 'sub' es la identidad, el email puede cambiar o repetirse
   auth_provider: Optional[AuthProvider] = None

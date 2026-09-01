@@ -4,6 +4,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr
 from pydantic_extra_types.timezone_name import TimeZoneName
 from pydantic_extra_types.language_code import LanguageAlpha2
 from pydantic_extra_types.phone_numbers import PhoneNumberValidator
+from src.domain.user import Role
 
 Phone = Annotated[str, PhoneNumberValidator(number_format="E164")]
 
@@ -29,5 +30,6 @@ class UserOut(BaseModel):
   timezone: str
   language: str
   only_contacts: bool = False
+  role: str = Role.USER
   created_at: datetime
   updated_at: datetime

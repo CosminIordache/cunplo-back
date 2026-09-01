@@ -11,6 +11,7 @@ from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.outlook_service import OutlookService
 from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.message_service import MessageService
+from src.application.use_cases.subscription_service import SubscriptionService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.usage_service import UsageService
 from src.application.use_cases.user_service import UserService
@@ -18,6 +19,7 @@ from src.infrastructure.driven.mongo.mongo_attachment_repository import MongoAtt
 from src.infrastructure.driven.mongo.mongo_contact_repository import MongoContactRepository
 from src.infrastructure.driven.mongo.mongo_integration_repository import MongoIntegrationRepository
 from src.infrastructure.driven.mongo.mongo_message_repository import MongoMessageRepository
+from src.infrastructure.driven.mongo.mongo_subscription_repository import MongoSubscriptionRepository
 from src.infrastructure.driven.mongo.mongo_task_repository import MongoTaskRepository
 from src.infrastructure.driven.mongo.mongo_usage_repository import MongoUsageRepository
 from src.infrastructure.driven.mongo.mongo_user_repository import MongoUserRepository
@@ -68,6 +70,8 @@ async def create_indexes(db) -> None:
   await db["attachments"].create_index([("message_id", 1), ("attachment_id", 1)], unique=True)
   # el borrado en cascada busca por usuario y por los mensajes del hilo
   await db["attachments"].create_index([("user_id", 1), ("message_id", 1)])
+  # una suscripción por usuario: el histórico de cobros lo llevará la pasarela
+  await db["subscriptions"].create_index("user_id", unique=True)
   # el gasto se suma por usuario, normalmente acotado a un periodo
   await db["usages"].create_index([("user_id", 1), ("created_at", -1)])
 
@@ -95,6 +99,7 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.api.router.task",
       "src.presentation.api.router.message",
       "src.presentation.api.router.attachment",
+      "src.presentation.api.router.subscription",
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
@@ -156,6 +161,11 @@ class Container(containers.DeclarativeContainer):
 
   contact_repository = providers.Factory(MongoContactRepository, db=db)
   contact_service = providers.Factory(ContactService, repository=contact_repository)
+
+  subscription_repository = providers.Factory(MongoSubscriptionRepository, db=db)
+  subscription_service = providers.Factory(
+    SubscriptionService, repository=subscription_repository
+  )
 
   usage_repository = providers.Factory(MongoUsageRepository, db=db)
   usage_service = providers.Factory(UsageService, repository=usage_repository)

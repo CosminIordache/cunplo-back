@@ -78,6 +78,14 @@ async def process_outlook_sync(ctx, integration_id: str, user_id: str) -> None:
       logfire.info("No new Outlook messages for {email}", email=email)
       return
 
+    # el 402 de la API no basta: aquí es donde se gasta (una llamada al LLM por
+    # correo). Va después del sync a propósito: el delta ya avanzó, así que al
+    # reactivar no se reprocesa lo de mientras estuvo caducado
+    subscription = await ctx["subscription_service"].get_by_user(user_oid)
+    if not (subscription and subscription.is_active):
+      logfire.info("User {user_id} has no active subscription, skipped", user_id=user_id)
+      return
+
     user = await ctx["user_service"].get(user_oid)
     only_contacts = bool(user and user.only_contacts)
 

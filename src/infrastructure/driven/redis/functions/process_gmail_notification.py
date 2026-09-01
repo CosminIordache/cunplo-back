@@ -79,6 +79,14 @@ async def process_gmail_notification(ctx, email: str, history_id: str) -> None:
 
 
 async def _process_messages(ctx, messages, email, user_id, integration) -> None:
+  # el 402 de la API no basta: aquí es donde se gasta (una llamada al LLM por correo).
+  # Va después del process_notification a propósito: el history_id ya avanzó, así que
+  # al reactivar no se reprocesa lo de mientras estuvo caducado
+  subscription = await ctx["subscription_service"].get_by_user(user_id)
+  if not (subscription and subscription.is_active):
+    logfire.info("User {user_id} has no active subscription, skipped", user_id=user_id)
+    return
+
   user = await ctx["user_service"].get(user_id)
   only_contacts = bool(user and user.only_contacts)
 

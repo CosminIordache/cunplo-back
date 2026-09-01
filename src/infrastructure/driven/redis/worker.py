@@ -52,6 +52,7 @@ async def startup(ctx) -> None:
     "task_service",
     "contact_service",
     "user_service",
+    "subscription_service",
     "agent_service",
   ):
     ctx[name] = await getattr(container, name)()
