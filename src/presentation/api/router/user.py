@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from dependency_injector.wiring import inject, Provide
 
 from src.container import Container
@@ -40,6 +40,34 @@ async def list_users(service: Service):
 @inject
 async def get_user(id: ObjectIdParam, service: Service):
   user = await service.get(id)
+  if not user:
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+  return user
+
+
+# tipos que el navegador muestra sin descargar; el resto no es una foto de perfil
+PICTURE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_PICTURE_BYTES = 5 * 1024 * 1024
+
+
+@router.put("/{id}/picture", response_model=UserOut)
+@inject
+async def set_user_picture(
+  id: ObjectIdParam,
+  service: Service,
+  current: CurrentUser,
+  file: UploadFile = File(...),
+):
+  if id != current.id:
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "not your user")
+  if file.content_type not in PICTURE_TYPES:
+    raise HTTPException(
+      status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "picture must be jpeg, png or webp"
+    )
+  data = await file.read(MAX_PICTURE_BYTES + 1)
+  if len(data) > MAX_PICTURE_BYTES:
+    raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "picture too large")
+  user = await service.set_picture(id, data, file.content_type)
   if not user:
     raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
   return user

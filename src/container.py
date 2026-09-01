@@ -110,15 +110,6 @@ class Container(containers.DeclarativeContainer):
   queue = providers.Resource(redis_pool)
   db = providers.Singleton(lambda c, name: c[name], client, config.mongo_db)
 
-  user_repository = providers.Factory(MongoUserRepository, db=db)
-  user_service = providers.Factory(UserService, repository=user_repository)
-  auth_service = providers.Factory(AuthService, users=user_service)
-
-  integration_repository = providers.Factory(MongoIntegrationRepository, db=db)
-  integration_service = providers.Factory(
-    IntegrationService, repository=integration_repository, refresh=refresh_token
-  )
-
   # credenciales del bucket de Railway (S3-compatible)
   config.s3_endpoint.from_env("AWS_ENDPOINT_URL", "")
   config.s3_region.from_env("AWS_REGION", "auto")
@@ -132,6 +123,17 @@ class Container(containers.DeclarativeContainer):
     access_key=config.s3_access_key,
     secret_key=config.s3_secret_key,
     bucket=config.s3_bucket,
+  )
+
+  user_repository = providers.Factory(MongoUserRepository, db=db)
+  user_service = providers.Factory(
+    UserService, repository=user_repository, storage=storage
+  )
+  auth_service = providers.Factory(AuthService, users=user_service)
+
+  integration_repository = providers.Factory(MongoIntegrationRepository, db=db)
+  integration_service = providers.Factory(
+    IntegrationService, repository=integration_repository, refresh=refresh_token
   )
 
   attachment_repository = providers.Factory(MongoAttachmentRepository, db=db)
