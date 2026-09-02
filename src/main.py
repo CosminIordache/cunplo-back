@@ -14,7 +14,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from src.container import Container
 from src.infrastructure.driving import gmail_webhook, outlook_webhook
-from src.presentation.api.router import attachment, auth, contact, integration, message, subscription, task, user
+from src.presentation.api.router import attachment, auth, contact, graph, integration, message, subscription, task, user
 
 container = Container()
 
@@ -39,6 +39,7 @@ app.include_router(task.router, prefix="/api/v1")
 app.include_router(message.router, prefix="/api/v1")
 app.include_router(attachment.router, prefix="/api/v1")
 app.include_router(subscription.router, prefix="/api/v1")
+app.include_router(graph.router, prefix="/api/v1")
 
 # Add Logfire: separa los logs por entorno (local / prod) según ENVIRONMENT en .env
 logfire.configure(environment=os.getenv("ENV"))

@@ -8,6 +8,7 @@ from src.application.use_cases.attachment_service import AttachmentService
 from src.application.use_cases.auth_service import AuthService
 from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
+from src.application.use_cases.graph_service import GraphService
 from src.application.use_cases.outlook_service import OutlookService
 from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.message_service import MessageService
@@ -17,6 +18,7 @@ from src.application.use_cases.usage_service import UsageService
 from src.application.use_cases.user_service import UserService
 from src.infrastructure.driven.mongo.mongo_attachment_repository import MongoAttachmentRepository
 from src.infrastructure.driven.mongo.mongo_contact_repository import MongoContactRepository
+from src.infrastructure.driven.mongo.mongo_graph_repository import MongoGraphRepository
 from src.infrastructure.driven.mongo.mongo_integration_repository import MongoIntegrationRepository
 from src.infrastructure.driven.mongo.mongo_message_repository import MongoMessageRepository
 from src.infrastructure.driven.mongo.mongo_subscription_repository import MongoSubscriptionRepository
@@ -100,6 +102,7 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.api.router.message",
       "src.presentation.api.router.attachment",
       "src.presentation.api.router.subscription",
+      "src.presentation.api.router.graph",
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
@@ -158,6 +161,9 @@ class Container(containers.DeclarativeContainer):
   task_service = providers.Factory(
     TaskService, repository=task_repository, messages=message_service
   )
+
+  graph_repository = providers.Factory(MongoGraphRepository, db=db)
+  graph_service = providers.Factory(GraphService, repository=graph_repository)
 
   contact_repository = providers.Factory(MongoContactRepository, db=db)
   contact_service = providers.Factory(ContactService, repository=contact_repository)
