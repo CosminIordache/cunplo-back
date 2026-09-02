@@ -16,6 +16,7 @@ class UserUpdate(BaseModel):
   phone: Optional[Phone] = None
   timezone: Optional[TimeZoneName] = None
   language: Optional[LanguageAlpha2] = None
+  task_language: Optional[LanguageAlpha2] = None
   only_contacts: Optional[bool] = None
 
 
@@ -29,6 +30,7 @@ class UserOut(BaseModel):
   phone: Optional[str] = None
   timezone: str
   language: str
+  task_language: str = "en"
   only_contacts: bool = False
   role: str = Role.USER
   created_at: datetime

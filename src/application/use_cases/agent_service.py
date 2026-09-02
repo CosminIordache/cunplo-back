@@ -45,7 +45,8 @@ El correo del dueño del buzón te lo dan al principio del prompt. Fíjate en é
 qué lado estás: si el CORREO NUEVO sale del dueño, es él quien acaba de responder.
 
 Campos:
-- title: frase corta con la acción concreta. No es un resumen del correo.
+- title: frase corta con la acción concreta. No es un resumen del correo. Escríbelo siempre
+  en el IDIOMA DE LA TAREA que te dan al principio del prompt, aunque el correo esté en otro.
 - status TODO: le toca actuar al dueño (una petición, una pregunta, un plazo suyo).
 - status WAITING_RESPONSE: el dueño ya respondió y espera a la otra parte.
 - status DONE: el hilo cierra la acción (entregado, pagado, confirmado, cancelado).
@@ -78,7 +79,7 @@ class AgentService:
       instructions=INSTRUCTIONS
      )
 
-  async def run_tasks(self, user_id: ObjectId, owner_email: str, thread_messages: Optional[List[AgentEmailMessage]], new_message: AgentEmailMessage) -> Optional[ExtractedTask]:
+  async def run_tasks(self, user_id: ObjectId, owner_email: str, task_language: str, thread_messages: Optional[List[AgentEmailMessage]], new_message: AgentEmailMessage) -> Optional[ExtractedTask]:
     logfire.info(
       "Agent analyzing thread {thread_id} ({previous} previous mails) from {sender} for owner {owner}",
       thread_id=new_message.thread_id,
@@ -86,7 +87,7 @@ class AgentService:
       sender=new_message.sender,
       owner=owner_email,
     )
-    result = await self.agent.run(self._prompt(owner_email, thread_messages, new_message))
+    result = await self.agent.run(self._prompt(owner_email, task_language, thread_messages, new_message))
     
     await self.usage_service.record(user_id, self.agent.model.model_name, result)
 
@@ -114,6 +115,7 @@ class AgentService:
   def _prompt(
     self,
     owner_email: str,
+    task_language: str,
     thread_messages: Optional[List[AgentEmailMessage]],
     new_message: AgentEmailMessage,
   ) -> str:
@@ -123,6 +125,7 @@ class AgentService:
       # ponytail: hoy = ahora del worker, no la fecha real del correo; pasar received_at si el retraso importa
       f"FECHA DE HOY: {datetime.now().astimezone().strftime('%A %Y-%m-%d %H:%M %Z')}"
       f"\nDUEÑO DEL BUZÓN: {owner_email}"
+      f"\nIDIOMA DE LA TAREA (ISO 639-1): {task_language}"
       f"\n\nHILO PREVIO (contexto):\n\n{context or '(no hay correos previos)'}"
       f"\n\n=== CORREO NUEVO ===\n\n{self._format(new_message)}"
     )

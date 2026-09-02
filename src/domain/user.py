@@ -31,6 +31,9 @@ class User:
   # (Graph solo sirve /me/photo/$value binario), así que ahí queda None.
   picture: Optional[str] = None
 
+  # idioma en el que el agente escribe las tareas
+  task_language: LanguageAlpha2 = LanguageAlpha2("en")
+
   # si está activo solo se analizan los correos cuyo remitente ya es contacto del usuario
   only_contacts: bool = False
 
