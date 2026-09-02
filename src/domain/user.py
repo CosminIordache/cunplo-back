@@ -37,6 +37,9 @@ class User:
   # si está activo solo se analizan los correos cuyo remitente ya es contacto del usuario
   only_contacts: bool = False
 
+  # el usuario ya completó el onboarding
+  onboarded: bool = False
+
   role: Role = Role.USER
 
   # con quién entra: el 'sub' es la identidad, el email puede cambiar o repetirse

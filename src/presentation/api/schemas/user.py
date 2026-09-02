@@ -18,6 +18,7 @@ class UserUpdate(BaseModel):
   language: Optional[LanguageAlpha2] = None
   task_language: Optional[LanguageAlpha2] = None
   only_contacts: Optional[bool] = None
+  onboarded: Optional[bool] = None
 
 
 class UserOut(BaseModel):
@@ -32,6 +33,7 @@ class UserOut(BaseModel):
   language: str
   task_language: str = "en"
   only_contacts: bool = False
+  onboarded: bool = False
   role: str = Role.USER
   created_at: datetime
   updated_at: datetime
