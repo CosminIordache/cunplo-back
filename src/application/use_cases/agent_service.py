@@ -51,11 +51,15 @@ Campos:
 - status WAITING_RESPONSE: el dueño ya respondió y espera a la otra parte.
 - status DONE: el hilo cierra la acción (entregado, pagado, confirmado, cancelado).
 - status TO_VALIDATE: hay algo pendiente pero no sabes de quién es el turno.
-- contacts: las personas implicadas en la tarea, sin el dueño del buzón. Incluye a las
-  que van en copia (Cc) si son personas reales. Saca name y phone de la firma del correo
-  cuando estén; si no aparecen, déjalos null y nunca los inventes.
-  Descarta buzones genéricos y automáticos: info@, noreply@, no-reply@, ventas@, soporte@,
-  hola@, admin@, facturacion@, newsletter@ y similares. Solo personas.
+- contacts: TODAS las personas que intervienen en el hilo, sin el dueño del buzón.
+  Recórrete las cabeceras From, To y Cc de todos los correos (el previo y el nuevo) y también
+  el cuerpo y las firmas: si alguien aparece con su email, va en la lista. Una persona, una
+  entrada: no repitas el mismo email dos veces aunque salga en varios correos.
+  - email: OBLIGATORIO. Sin email no hay contacto; si solo tienes un nombre suelto, descártalo.
+  - name y phone: OPCIONALES. Sácalos de la firma, del display name de la cabecera
+    ("Ana Pérez <ana@x.com>") o del cuerpo. Si no aparecen, déjalos null: un contacto con
+    solo email es válido y se crea igual. Nunca inventes ni deduzcas un nombre a partir
+    del email.
 - due_at: solo cuando el hilo da una fecha concreta. Nunca la inventes ni la estimes.
   Resuelve las fechas relativas ("mañana", "la semana que viene", "el viernes") contra la
   FECHA DE HOY que te dan al principio del prompt, tomando como referencia el correo nuevo.
@@ -89,7 +93,11 @@ class AgentService:
     )
     result = await self.agent.run(self._prompt(owner_email, task_language, thread_messages, new_message))
     
-    await self.usage_service.record(user_id, self.agent.model.model_name, result)
+    await self.usage_service.record(
+      user_id = user_id, 
+      model = self.agent.model.model_name,
+      result = result
+    )
 
     usage = result.usage
     if not result.output:
