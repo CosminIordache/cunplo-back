@@ -23,8 +23,10 @@ class TaskService:
   ) -> Optional[Task]:
     return await self.repository.get_by_thread(user_id, integration_id, thread_id)
 
-  async def get_by_user(self, user_id: ObjectId, status: Optional[Status] = None) -> list[Task]:
-    return await self.repository.get_by_user(user_id, status)
+  async def get_by_user(
+    self, user_id: ObjectId, status: Optional[Status] = None, skip: int = 0, limit: int = 0
+  ) -> list[Task]:
+    return await self.repository.get_by_user(user_id, status, skip, limit)
 
   async def update(self, task_id: ObjectId, user_id: ObjectId, changes: dict) -> Optional[Task]:
     return await self.repository.update(task_id, user_id, changes)

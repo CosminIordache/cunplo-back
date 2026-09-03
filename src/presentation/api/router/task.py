@@ -19,9 +19,13 @@ Service = Annotated[TaskService, Depends(Provide[Container.task_service])]
 @router.get("", response_model=list[TaskOut])
 @inject
 async def list_tasks(
-  service: Service, current: CurrentUser, task_status: Optional[TaskStatus] = None
+  service: Service,
+  current: CurrentUser,
+  task_status: Optional[TaskStatus] = None,
+  skip: int = 0,
+  limit: int = 12,
 ):
-  return await service.get_by_user(current.id, task_status)
+  return await service.get_by_user(current.id, task_status, skip, limit)
 
 
 @router.patch("/{id}", response_model=TaskOut)

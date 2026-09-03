@@ -61,7 +61,9 @@ class MongoTaskRepository:
     )
     return _to_task(doc) if doc else None
 
-  async def get_by_user(self, user_id: ObjectId, status: Optional[Status] = None) -> list[Task]:
+  async def get_by_user(
+    self, user_id: ObjectId, status: Optional[Status] = None, skip: int = 0, limit: int = 0
+  ) -> list[Task]:
     # user_id en el filtro: nadie lee las tareas de otro
     query = {"user_id": user_id}
     if status:
@@ -69,7 +71,10 @@ class MongoTaskRepository:
     cursor = self.collection.find(query)
     # Las sin due_at salen primero (null ordena antes en Mongo).
     # Si molesta, ordena en el service o mete un $sort con $ifNull en un pipeline.
-    return [_to_task(d) async for d in cursor.sort([("due_at", 1), ("created_at", -1)])]
+    cursor = cursor.sort([("due_at", 1), ("created_at", -1)]).skip(skip)
+    if limit:
+      cursor = cursor.limit(limit)
+    return [_to_task(d) async for d in cursor]
 
   async def update(self, task_id: ObjectId, user_id: ObjectId, changes: dict) -> Optional[Task]:
     changes["updated_at"] = datetime.now(UTC)
