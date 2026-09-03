@@ -103,6 +103,7 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.api.router.attachment",
       "src.presentation.api.router.subscription",
       "src.presentation.api.router.graph",
+      "src.presentation.api.router.usage",
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",

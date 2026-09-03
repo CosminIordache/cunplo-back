@@ -8,13 +8,14 @@ class UsageService:
   def __init__(self, repository: UsageRepository):
     self.repository = repository
 
-  async def record(self, user_id: ObjectId, model: str, result) -> Usage:
+  async def record(self, user_id: ObjectId, email: str, model: str, result) -> Usage:
     """Apunta lo que costó una run del agente. `result` es el AgentRunResult
     de pydantic-ai: aquí es donde se traduce a dominio, y en ningún otro sitio."""
     usage = result.usage
     return await self.repository.create(
       Usage(
         user_id=user_id,
+        email=email,
         model=model,
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
@@ -29,6 +30,9 @@ class UsageService:
 
   async def total_by_user(self, user_id: ObjectId) -> dict:
     return await self.repository.total_by_user(user_id)
+
+  async def totals_by_user(self) -> list[dict]:
+    return await self.repository.totals_by_user()
 
   async def delete_all_by_user(self, user_id: ObjectId) -> int:
     return await self.repository.delete_all_by_user(user_id)

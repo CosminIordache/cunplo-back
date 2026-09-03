@@ -11,6 +11,9 @@ class Usage:
   """Una llamada al LLM con su coste, para imputársela a un usuario."""
 
   user_id: ObjectId
+  # desnormalizado a propósito: si el usuario borra su cuenta el user_id deja de
+  # resolver, y el gasto ya facturado tiene que seguir teniendo nombre
+  email: Optional[str]
   model: str  # el id real ejecutado, no el configurado: sale de ModelResponse.model_name
 
   input_tokens: int

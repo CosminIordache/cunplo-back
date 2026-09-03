@@ -94,7 +94,8 @@ class AgentService:
     result = await self.agent.run(self._prompt(owner_email, task_language, thread_messages, new_message))
     
     await self.usage_service.record(
-      user_id = user_id, 
+      user_id = user_id,
+      email = owner_email,
       model = self.agent.model.model_name,
       result = result
     )
