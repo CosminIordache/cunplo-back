@@ -59,6 +59,40 @@ class MongoUsageRepository:
       "cost": total["cost"].to_decimal(),
     }
 
+  async def total_all_users(self) -> dict:
+    """El gasto de la casa entera, sin desglosar por usuario."""
+    cursor = self.collection.aggregate([
+      {"$group": {
+        "_id": None,
+        "runs": {"$sum": 1},
+        "input_tokens": {"$sum": "$input_tokens"},
+        "output_tokens": {"$sum": "$output_tokens"},
+        "cache_read_tokens": {"$sum": "$cache_read_tokens"},
+        "reasoning_tokens": {"$sum": "$reasoning_tokens"},
+        "cost": {"$sum": {"$toDecimal": {"$ifNull": ["$cost", 0]}}},
+      }},
+    ])
+    totals = await cursor.to_list(1)
+    if not totals:
+      return {
+        "runs": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "reasoning_tokens": 0,
+        "cost": Decimal(0),
+      }
+
+    total = totals[0]
+    return {
+      "runs": total["runs"],
+      "input_tokens": total["input_tokens"],
+      "output_tokens": total["output_tokens"],
+      "cache_read_tokens": total["cache_read_tokens"],
+      "reasoning_tokens": total["reasoning_tokens"],
+      "cost": total["cost"].to_decimal(),
+    }
+
   async def totals_by_user(self) -> list[dict]:
     """Lo mismo pero para todos: una fila por usuario, el que más gasta primero.
     El email va como dato del grupo, no como clave: las filas viejas no lo tienen

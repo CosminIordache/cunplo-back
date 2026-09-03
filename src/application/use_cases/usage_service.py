@@ -34,5 +34,8 @@ class UsageService:
   async def totals_by_user(self) -> list[dict]:
     return await self.repository.totals_by_user()
 
+  async def total_all_users(self) -> dict:
+    return await self.repository.total_all_users()
+
   async def delete_all_by_user(self, user_id: ObjectId) -> int:
     return await self.repository.delete_all_by_user(user_id)
