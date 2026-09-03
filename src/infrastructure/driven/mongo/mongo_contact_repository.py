@@ -38,15 +38,19 @@ class MongoContactRepository:
     doc = await self.collection.find_one({"user_id": user_id, "email": email})
     return _to_contact(doc) if doc else None
 
-  async def get_by_user(self, user_id: ObjectId, search: Optional[str] = None) -> list[Contact]:
+  async def get_by_user(
+    self, user_id: ObjectId, search: Optional[str] = None, skip: int = 0, limit: int = 0
+  ) -> list[Contact]:
     # user_id en el filtro: nadie lee los contactos de otro
     filter = {"user_id": user_id}
     if search:
       # ponytail: regex case-insensitive sin índice; text index si la colección crece
       pattern = {"$regex": re.escape(search), "$options": "i"}
       filter["$or"] = [{"name": pattern}, {"email": pattern}]
-    cursor = self.collection.find(filter)
-    return [_to_contact(d) async for d in cursor.sort("name", 1)]
+    cursor = self.collection.find(filter).sort("name", 1).skip(skip)
+    if limit:
+      cursor = cursor.limit(limit)
+    return [_to_contact(d) async for d in cursor]
 
   async def update(self, contact_id: ObjectId, user_id: ObjectId, changes: dict) -> Optional[Contact]:
     changes["updated_at"] = datetime.now(UTC)

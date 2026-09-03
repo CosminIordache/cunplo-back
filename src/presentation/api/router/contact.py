@@ -32,9 +32,15 @@ async def create_contact(payload: ContactCreate, service: Service, current: Curr
 
 @router.get("", response_model=list[ContactOut])
 @inject
-async def list_contacts(service: Service, current: CurrentUser, search: Optional[str] = None):
+async def list_contacts(
+  service: Service,
+  current: CurrentUser,
+  search: Optional[str] = None,
+  skip: int = 0,
+  limit: int = 25,
+):
   """search filtra por nombre o email (subcadena, case-insensitive)."""
-  return await service.get_by_user(current.id, search)
+  return await service.get_by_user(current.id, search, skip, limit)
 
 
 @router.get("/{id}", response_model=ContactOut)
