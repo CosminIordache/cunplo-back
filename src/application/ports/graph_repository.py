@@ -1,6 +1,6 @@
-from typing import Protocol
+from typing import AsyncIterator, Protocol
 from bson import ObjectId
 
 
 class GraphRepository(Protocol):
-  async def build(self, user_id: ObjectId) -> dict: ...
+  def stream(self, user_id: ObjectId) -> AsyncIterator[bytes]: ...

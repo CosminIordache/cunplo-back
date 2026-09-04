@@ -1,3 +1,6 @@
+import json
+from typing import AsyncIterator
+
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -18,10 +21,10 @@ class MongoGraphRepository:
   def __init__(self, db: AsyncIOMotorDatabase):
     self.collection = db["tasks"]
 
-  async def build(self, user_id: ObjectId) -> dict:
-    # user_id en el $match: nadie lee el grafo de otro. El índice
-    # (user_id, status, due_at) lo cubre, y el $lookup entra por _id.
-    cursor = self.collection.aggregate([
+  # Por tarea: su nodo, sus contactos, sus mensajes y los participantes de
+  # cada mensaje. stream() emite un chunk de nodos+edges por documento.
+  def _pipeline(self, user_id: ObjectId) -> list:
+    return [
       {"$match": {"user_id": user_id}},
       {"$lookup": {
         "from": "contacts",
@@ -37,7 +40,10 @@ class MongoGraphRepository:
         "let": {"integration_id": "$integration_id", "thread_id": "$thread_id"},
         "as": "messages",
         "pipeline": [
+          # user_id primero: es el prefijo del índice de messages, sin él Mongo
+          # no lo usa y escanea la colección entera por cada tarea
           {"$match": {"$expr": {"$and": [
+            {"$eq": ["$user_id", user_id]},
             {"$eq": ["$integration_id", "$$integration_id"]},
             {"$eq": ["$thread_id", "$$thread_id"]},
           ]}}},
@@ -116,50 +122,26 @@ class MongoGraphRepository:
           }},
         }}},
       }},
-      # nodos y aristas ya montados: el $lookup resolvió los contact_ids que
-      # apuntan a un contacto borrado, así que las aristas huérfanas no salen
-      {"$group": {
-        "_id": None,
-        "tasks": {"$push": "$task"},
-        "messages": {"$push": "$messages"},
-        # los de la tarea y los de las cabeceras, todos son nodos contacto
-        "contacts": {"$push": {"$concatArrays": [
-          "$contacts",
-          {"$reduce": {"input": "$participants", "initialValue": [],
-                       "in": {"$concatArrays": ["$$value", "$$this.contacts"]}}},
-        ]}},
-        # todas las aristas apuntan hacia abajo: contacto -> tarea -> mensaje,
-        # y contacto -> mensaje para quien solo participó en el correo
-        "edges": {"$push": {"$concatArrays": [
-          {"$map": {"input": "$contacts", "as": "c",
-                    "in": {"source": "$$c.id", "target": "$task.id"}}},
-          {"$map": {"input": "$messages", "as": "m",
-                    "in": {"source": "$task.id", "target": "$$m.id"}}},
-          {"$reduce": {"input": "$participants", "initialValue": [],
-                       "in": {"$concatArrays": ["$$value", {"$map": {
-                         "input": "$$this.contacts", "as": "p",
-                         "in": {"source": "$$p.id", "target": "$$this.message_id"},
-                       }}]}}},
-        ]}},
-      }},
-      {"$set": {
-        # cada tarea empujó su propia lista: aplanarlas deja una sola
-        f: {"$reduce": {"input": f"${f}", "initialValue": [],
-                        "in": {"$concatArrays": ["$$value", "$$this"]}}}
-        for f in ("contacts", "messages", "edges")
-      }},
-      {"$project": {
-        "_id": 0,
-        # un contacto aparece en tantas tareas como tenga: $setUnion lo deja una
-        # vez. Los mensajes no se repiten: cada uno cuelga de un solo hilo
-        "nodes": {"$concatArrays": [
-          "$tasks", {"$setUnion": ["$contacts"]}, "$messages",
-        ]},
-        "edges": 1,
-      }},
-    ])
-    # ponytail: sin paginar, el grafo entero en una respuesta. El techo no es Mongo
-    # sino el payload y el canvas del front; si pesa, agregar por contacto y pedir
-    # las tareas de un nodo al hacer clic
-    graph = await cursor.to_list(1)
-    return graph[0] if graph else {"nodes": [], "edges": []}
+    ]
+
+  async def stream(self, user_id: ObjectId) -> AsyncIterator[bytes]:
+    """Un chunk NDJSON por tarea, tal como las va devolviendo Mongo: el front
+    puede empezar a pintar con la primera tarea en vez de esperar las 7000."""
+    cursor = self.collection.aggregate(self._pipeline(user_id))
+    async for doc in cursor:
+      contacts = doc["contacts"] + [
+        c for p in doc["participants"] for c in p["contacts"]
+      ]
+      edges = (
+        [{"source": c["id"], "target": doc["task"]["id"]} for c in doc["contacts"]]
+        + [{"source": doc["task"]["id"], "target": m["id"]} for m in doc["messages"]]
+        + [
+          {"source": c["id"], "target": p["message_id"]}
+          for p in doc["participants"] for c in p["contacts"]
+        ]
+      )
+      chunk = {
+        "nodes": [doc["task"], *contacts, *doc["messages"]],
+        "edges": edges,
+      }
+      yield (json.dumps(chunk, default=str) + "\n").encode()

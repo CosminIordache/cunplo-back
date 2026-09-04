@@ -67,6 +67,8 @@ async def create_indexes(db) -> None:
   await db["tasks"].create_index([("user_id", 1), ("status", 1), ("due_at", 1)])
   # un contacto por usuario y email: el mismo email puede ser cliente de dos usuarios
   await db["contacts"].create_index([("user_id", 1), ("email", 1)], unique=True)
+  # el $lookup del grafo casa solo por email; sin este índice escanea todo contacts
+  await db["contacts"].create_index("email")
   # el id del adjunto solo es único dentro de su mensaje: la pareja evita duplicar
   # al reprocesarse el mismo correo
   await db["attachments"].create_index([("message_id", 1), ("attachment_id", 1)], unique=True)
