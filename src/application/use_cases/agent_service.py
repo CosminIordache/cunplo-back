@@ -51,15 +51,27 @@ Campos:
 - status WAITING_RESPONSE: el dueño ya respondió y espera a la otra parte.
 - status DONE: el hilo cierra la acción (entregado, pagado, confirmado, cancelado).
 - status TO_VALIDATE: hay algo pendiente pero no sabes de quién es el turno.
-- contacts: TODAS las personas que intervienen en el hilo, sin el dueño del buzón.
+- contacts: TODAS las PERSONAS REALES que intervienen en el hilo, sin el dueño del buzón.
   Recórrete las cabeceras From, To y Cc de todos los correos (el previo y el nuevo) y también
-  el cuerpo y las firmas: si alguien aparece con su email, va en la lista. Una persona, una
+  el cuerpo y las firmas: si una persona aparece con su email, va en la lista. Una persona, una
   entrada: no repitas el mismo email dos veces aunque salga en varios correos.
+  SOLO personas, NUNCA empresas ni buzones genéricos. Descarta cualquier email que no
+  pertenezca a una persona con nombre y apellidos: info@, ventas@, soporte@, noreply@,
+  facturacion@, admin@, contacto@, hola@, y en general cualquier dirección o display name
+  que sea el nombre de una empresa, un departamento, una marca, un sistema automático o
+  una lista de distribución. Si no puedes identificar a una persona concreta detrás del
+  email, no la incluyas.
+  EXCEPCIÓN: si un correo llega desde un buzón genérico de empresa pero el cuerpo o la firma
+  identifican claramente a la persona que escribe ("Un saludo, Ana Pérez"), sí es un
+  contacto: usa ese email genérico como email y el nombre de la persona como name. Lo que
+  descartas es la empresa sin nadie detrás, no a la persona que escribe desde ella.
   - email: OBLIGATORIO. Sin email no hay contacto; si solo tienes un nombre suelto, descártalo.
-  - name y phone: OPCIONALES. Sácalos de la firma, del display name de la cabecera
-    ("Ana Pérez <ana@x.com>") o del cuerpo. Si no aparecen, déjalos null: un contacto con
-    solo email es válido y se crea igual. Nunca inventes ni deduzcas un nombre a partir
-    del email.
+  - name: el nombre y apellidos de la persona. Sácalo de la firma, del display name de la
+    cabecera ("Ana Pérez <ana@x.com>") o del cuerpo. Si no aparece por ningún sitio, déjalo
+    null. Nunca inventes ni deduzcas un nombre a partir del email, y nunca pongas el nombre
+    de la empresa como name.
+  - phone: el teléfono de la persona si aparece en la firma o en el cuerpo. Si no, null.
+    No uses el teléfono general de la empresa como teléfono de la persona.
 - due_at: solo cuando el hilo da una fecha concreta. Nunca la inventes ni la estimes.
   Resuelve las fechas relativas ("mañana", "la semana que viene", "el viernes") contra la
   FECHA DE HOY que te dan al principio del prompt, tomando como referencia el correo nuevo.
