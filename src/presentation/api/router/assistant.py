@@ -5,11 +5,10 @@ from pydantic import BaseModel, Field
 
 from src.container import Container
 from src.application.use_cases.assistant_agent_service import AssistantService
-from src.presentation.middleware.auth import CurrentUser, get_current_user
+from src.presentation.middleware.auth import ProUser
 
-router = APIRouter(
-  prefix="/assistant", tags=["assistant"], dependencies=[Depends(get_current_user)]
-)
+# solo plan pro (active o canceled): el guard hace de puerta, no hace falta otro de cookie
+router = APIRouter(prefix="/assistant", tags=["assistant"])
 
 Service = Annotated[AssistantService, Depends(Provide[Container.assistant_service])]
 
@@ -27,5 +26,5 @@ class Answer(BaseModel):
 
 @router.post("/ask", response_model=Answer)
 @inject
-async def ask(payload: Question, current: CurrentUser, service: Service):
+async def ask(payload: Question, current: ProUser, service: Service):
   return await service.ask(current.id, current.email, current.language, payload.question)

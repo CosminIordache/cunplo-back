@@ -8,6 +8,7 @@ from fastapi import Cookie, Depends, HTTPException, status
 from joserfc.errors import JoseError
 
 from src.container import Container
+from src.domain.subscription import Plan, SubscriptionStatus
 from src.domain.user import Role, User
 from src.application.use_cases.auth_service import AuthService
 from src.application.use_cases.subscription_service import SubscriptionService
@@ -64,3 +65,28 @@ async def require_active_subscription(
 
 
 SubscribedUser = Annotated[User, Depends(require_active_subscription)]
+
+
+@inject
+async def require_pro(
+  user: CurrentUser,
+  subscriptions: Annotated[
+    SubscriptionService, Depends(Provide[Container.subscription_service])
+  ],
+) -> User:
+  """Puerta de las funciones de pago: plan pro, active o canceled (hasta que caduque lo
+  pagado). El trial no entra. Los admins pasan siempre."""
+  if user.role == Role.ADMIN:
+    return user
+  subscription = await subscriptions.get_by_user(user.id)
+  if (
+    not subscription
+    or subscription.plan is not Plan.PRO
+    or subscription.status not in (SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED)
+    or not subscription.is_active
+  ):
+    raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "pro plan required")
+  return user
+
+
+ProUser = Annotated[User, Depends(require_pro)]
