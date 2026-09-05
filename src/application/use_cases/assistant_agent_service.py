@@ -23,6 +23,14 @@ class AssistantAnswer:
   message_ids: list[str]
 
 
+@dataclass
+class Clarification:
+  """El agente no puede seguir sin que el usuario elija: pregunta y opciones."""
+
+  question: str
+  options: list[str]
+
+
 INSTRUCTIONS = """
 Eres el asistente personal de un autónomo o pequeño negocio. Conoces sus tareas, sus
 contactos y los correos de los que salen, y le respondes como lo haría una persona de
@@ -62,6 +70,13 @@ done (cerrada), to_validate (pendiente sin saber de quién es el turno).
 Salida: `answer` es el texto para el usuario. En `task_ids`, `contact_ids` y `message_ids`
 devuelve los `_id` EXACTOS de las tareas, contactos y mensajes que usas en la respuesta. Nunca inventes ids ni incluyas
 los que no vengan al caso; listas vacías si no usaste ninguno.
+
+Ambigüedad: si la pregunta puede referirse a varias cosas y no hay forma de saber cuál
+(dos contactos con el mismo nombre, varias tareas que encajan igual), NO elijas tú:
+devuelve `Clarification` con una pregunta corta y las opciones tal como las distinguiría
+el usuario ("Pablo Ruiz (pablo@ruiz.com)", "Pablo Gómez (pgomez@acme.com)"). Si el prompt
+trae ACLARACIÓN DEL USUARIO, es su elección a una pregunta anterior: úsala y no vuelvas a
+preguntar lo mismo.
 """
 
 
@@ -76,39 +91,45 @@ class AssistantService:
     self.agent = Agent(
       model="openai:gpt-5.6-luna",
       deps_type=MongoDeps,
-      output_type=AssistantAnswer,
+      output_type=[AssistantAnswer, Clarification],
       instructions=INSTRUCTIONS,
       tools=[mongo_tools.find],
       # sin esto OpenAI no devuelve el razonamiento y no habría nada que emitir
       model_settings=OpenAIResponsesModelSettings(openai_reasoning_summary="detailed"),
     )
 
-  def _prompt(self, language: str, question: str) -> str:
+  def _prompt(self, language: str, question: str, clarification: str | None) -> str:
     now = datetime.now().astimezone()
-    return (
+    prompt = (
       f"FECHA DE HOY: {now.strftime('%A %Y-%m-%d %H:%M %Z')}"
       f"\nHOY EN EPOCH MS: {int(now.timestamp() * 1000)}"
       f"\nIDIOMA (ISO 639-1): {language}"
       f"\n\nPREGUNTA: {question}"
     )
+    if clarification:
+      prompt += f"\nACLARACIÓN DEL USUARIO: {clarification}"
+    return prompt
 
   async def ask_stream(
-    self, user_id: ObjectId, email: str, language: str, question: str
+    self, user_id: ObjectId, email: str, language: str, question: str, clarification: str | None = None
   ) -> AsyncIterator[bytes]:
     """
     - {"thinking": "..."} trozos del razonamiento del modelo
     - {"status": "Buscando el correo de Pablo", "collection": "messages"}  cada consulta
     - {"delta": "..."} trozos del texto de la respuesta
-    - {"task_ids", "contact_ids", "message_ids"} la última, con los ids finales."""
-    
+    - {"task_ids", "contact_ids", "message_ids"} la última, con los ids finales.
+    - o bien {"clarification": "¿Qué Pablo?", "options": [...]} como última línea: el
+      cliente repite la pregunta con la opción elegida en `clarification`.
+    ponytail: sin message_history; la segunda vuelta rehace las consultas, que son baratas."""
+
     logfire.info("Assistant question (stream) from {email}: {question}", email=email, question=question)
-    
+
     sent = ""
-    
+
     deps = MongoDeps(user_id=user_id, db=self.db)
-    
+
     # iter() recorre el bucle del agente nodo a nodo: así vemos las tool calls, que run_stream esconde
-    async with self.agent.iter(self._prompt(language, question), deps=deps) as run:
+    async with self.agent.iter(self._prompt(language, question, clarification), deps=deps) as run:
       async for node in run:
         if Agent.is_call_tools_node(node):
           async with node.stream(run.ctx) as events:
@@ -134,7 +155,7 @@ class AssistantService:
               except (UnexpectedModelBehavior, ValidationError, ModelRetry):
                 continue
               
-              text = partial.answer or ""
+              text = getattr(partial, "answer", None) or ""  # Clarification no tiene answer
               
               if text.startswith(sent) and len(text) > len(sent):
                 yield _line({"delta": text[len(sent):]})
@@ -147,7 +168,12 @@ class AssistantService:
     )
     
     answer = result.output
-    
+
+    if isinstance(answer, Clarification):
+      logfire.info("Assistant asks {email} to clarify: {question}", email=email, question=answer.question)
+      yield _line({"clarification": answer.question, "options": answer.options})
+      return
+
     if len(answer.answer) > len(sent):  # lo que el debounce se dejara por emitir
       yield _line({"delta": answer.answer[len(sent):]})
     

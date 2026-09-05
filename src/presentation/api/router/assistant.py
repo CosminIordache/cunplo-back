@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from dependency_injector.wiring import inject, Provide
@@ -16,6 +16,8 @@ Service = Annotated[AssistantService, Depends(Provide[Container.assistant_servic
 
 class Question(BaseModel):
   question: str = Field(min_length=1)
+  # la opción elegida tras un {"clarification": ...}; se reenvía con la misma pregunta
+  clarification: Optional[str] = Field(default=None)
 
 
 class Answer(BaseModel):
@@ -30,6 +32,8 @@ async def ask_stream(payload: Question, current: ProUser, service: Service):
   """Igual que /ask pero NDJSON: {"delta": "..."} por trozo de texto y una última
   línea con task_ids / contact_ids / message_ids. El cliente pinta el texto según llega."""
   return StreamingResponse(
-    service.ask_stream(current.id, current.email, current.language, payload.question),
+    service.ask_stream(
+      current.id, current.email, current.language, payload.question, payload.clarification
+    ),
     media_type="application/x-ndjson",
   )
