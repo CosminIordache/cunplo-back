@@ -6,7 +6,7 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
-from src.domain.subscription import Subscription
+from src.domain.subscription import Plan, Subscription, SubscriptionStatus
 
 
 def _to_document(subscription: Subscription) -> dict:
@@ -18,6 +18,9 @@ def _to_document(subscription: Subscription) -> dict:
 def _to_subscription(document: dict) -> Subscription:
   document = dict(document)
   document["id"] = document.pop("_id")
+  # Mongo guarda str: el dominio compara con `is` contra los enums, así que se convierten aquí
+  document["plan"] = Plan(document["plan"])
+  document["status"] = SubscriptionStatus(document["status"])
   return Subscription(**document)
 
 

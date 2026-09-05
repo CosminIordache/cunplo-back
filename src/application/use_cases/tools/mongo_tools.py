@@ -8,9 +8,7 @@ from bson import ObjectId
 from pydantic_ai import RunContext
 
 # lo que el asistente puede leer; nada de users ni usages (gasto)
-COLLECTIONS = {"tasks", "contacts", "messages", "integrations"}
-# integrations guarda tokens: la proyección es fija, el LLM no elige qué campos ve
-SAFE_PROJECTION = {"integrations": {"_id": 1, "provider": 1, "email": 1}}
+COLLECTIONS = {"tasks", "contacts", "messages"}
 # operadores que ejecutan código o saltan el filtro: fuera
 FORBIDDEN = {"$where", "$function", "$accumulator", "$expr"}
 
@@ -59,13 +57,17 @@ def _encode(value: Any) -> Any:
 async def find(
   ctx: RunContext[MongoDeps],
   collection: str,
+  status: str,
   filter: Optional[dict] = None,
   projection: Optional[dict] = None,
   sort: Optional[dict] = None,
 ) -> list[dict]:
   """Consulta de SOLO LECTURA (find) sobre una colección del usuario.
 
-  - collection: "tasks", "contacts", "messages" o "integrations" (los buzones del usuario).
+  - collection: "tasks", "contacts" o "messages".
+  - status: frase corta, en el IDIOMA del usuario y en su tono, que describe lo que estás
+    buscando; se le muestra mientras esperas el resultado. Concreta, sin tecnicismos:
+    "Buscando el correo de Pablo", "Mirando qué tienes pendiente para mañana".
   - filter: filtro de Mongo en JSON. Los ids van como string hex de 24 caracteres y las
     fechas como ISO 8601; se convierten solos. Nunca hace falta poner user_id.
   - projection: campos a devolver, p.ej. {"title": 1, "status": 1}.
@@ -77,7 +79,7 @@ async def find(
   query = {**_decode(filter or {}), "user_id": ctx.deps.user_id}
   logfire.info("Assistant query on {collection}: {query}", collection=collection, query=query)
   # solo find: desde aquí no hay forma de escribir ni borrar
-  cursor = ctx.deps.db[collection].find(query, SAFE_PROJECTION.get(collection, projection))
+  cursor = ctx.deps.db[collection].find(query, projection)
   if sort:
     cursor = cursor.sort(list(sort.items()))
   docs = await cursor.to_list(length=None)

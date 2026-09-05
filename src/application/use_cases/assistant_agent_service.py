@@ -1,9 +1,14 @@
+import json
 import logfire
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
 
 from bson import ObjectId
-from pydantic_ai import Agent
+from pydantic import ValidationError
+from pydantic_ai import Agent, ModelRetry, UnexpectedModelBehavior
+from pydantic_ai.messages import FunctionToolCallEvent, ThinkingPart
+from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 
 from src.application.use_cases.tools import mongo_tools
 from src.application.use_cases.tools.mongo_tools import MongoDeps
@@ -13,7 +18,6 @@ from src.application.use_cases.usage_service import UsageService
 @dataclass
 class AssistantAnswer:
   answer: str
-  # ids (como string) de las tareas, contactos y mensajes en los que se apoya la respuesta
   task_ids: list[str]
   contact_ids: list[str]
   message_ids: list[str]
@@ -41,10 +45,6 @@ Colecciones y campos:
   (low | medium | high | urgent | null), due_at (fecha o null), contact_ids (ids de contacts),
   thread_id, integration_id, created_at, updated_at.
 - contacts: _id, name, email, phone, created_at.
-- integrations: _id, provider (google | microsoft), email. Son los BUZONES del usuario: puede
-  tener varios. tasks y messages llevan integration_id apuntando aquí. Cuando respondas con
-  mensajes o tareas, consulta integrations y di SIEMPRE desde qué correo (email) se habló,
-  porque el usuario necesita saber con qué cuenta trató con esa persona.
 - messages: _id, thread_id, integration_id, sender, to, cc, subject, body, internal_date.
   Solo se guardan los correos de hilos que generaron una tarea, no todo el buzón.
   Para leer el correo de una tarea filtra por su thread_id e integration_id.
@@ -65,6 +65,10 @@ los que no vengan al caso; listas vacías si no usaste ninguno.
 """
 
 
+def _line(obj: dict) -> bytes:
+  return json.dumps(obj).encode() + b"\n"
+
+
 class AssistantService:
   def __init__(self, db, usage_service: UsageService):
     self.db = db
@@ -75,29 +79,83 @@ class AssistantService:
       output_type=AssistantAnswer,
       instructions=INSTRUCTIONS,
       tools=[mongo_tools.find],
+      # sin esto OpenAI no devuelve el razonamiento y no habría nada que emitir
+      model_settings=OpenAIResponsesModelSettings(openai_reasoning_summary="detailed"),
     )
 
-  async def ask(self, user_id: ObjectId, email: str, language: str, question: str) -> AssistantAnswer:
-    logfire.info("Assistant question from {email}: {question}", email=email, question=question)
+  def _prompt(self, language: str, question: str) -> str:
     now = datetime.now().astimezone()
-    prompt = (
+    return (
       f"FECHA DE HOY: {now.strftime('%A %Y-%m-%d %H:%M %Z')}"
       f"\nHOY EN EPOCH MS: {int(now.timestamp() * 1000)}"
       f"\nIDIOMA (ISO 639-1): {language}"
       f"\n\nPREGUNTA: {question}"
     )
-    result = await self.agent.run(prompt, deps=MongoDeps(user_id=user_id, db=self.db))
+
+  async def ask_stream(
+    self, user_id: ObjectId, email: str, language: str, question: str
+  ) -> AsyncIterator[bytes]:
+    """
+    - {"thinking": "..."} trozos del razonamiento del modelo
+    - {"status": "Buscando el correo de Pablo", "collection": "messages"}  cada consulta
+    - {"delta": "..."} trozos del texto de la respuesta
+    - {"task_ids", "contact_ids", "message_ids"} la última, con los ids finales."""
+    
+    logfire.info("Assistant question (stream) from {email}: {question}", email=email, question=question)
+    
+    sent = ""
+    
+    deps = MongoDeps(user_id=user_id, db=self.db)
+    
+    # iter() recorre el bucle del agente nodo a nodo: así vemos las tool calls, que run_stream esconde
+    async with self.agent.iter(self._prompt(language, question), deps=deps) as run:
+      async for node in run:
+        if Agent.is_call_tools_node(node):
+          async with node.stream(run.ctx) as events:
+            async for event in events:
+              if isinstance(event, FunctionToolCallEvent):
+                args = event.part.args_as_dict()
+                # el modelo redacta el status: es lo que ve el usuario mientras busca
+                yield _line({"status": args.get("status"), "collection": args.get("collection")})
+        elif Agent.is_model_request_node(node):
+          thought = ""  # el razonamiento es por petición: cada vuelta empieza de cero
+          async with node.stream(run.ctx) as stream:
+            # snapshots de la respuesta: de cada uno sacamos lo que ha crecido
+            async for response in stream.stream_response(debounce_by=0.1):
+              thinking = "".join(p.content for p in response.parts if isinstance(p, ThinkingPart))
+              
+              if thinking.startswith(thought) and len(thinking) > len(thought):
+                yield _line({"thinking": thinking[len(thought):]})
+                thought = thinking
+              # la salida estructurada llega como JSON parcial: solo valida en la respuesta final
+              
+              try:
+                partial = await stream.validate_response_output(response, allow_partial=True)
+              except (UnexpectedModelBehavior, ValidationError, ModelRetry):
+                continue
+              
+              text = partial.answer or ""
+              
+              if text.startswith(sent) and len(text) > len(sent):
+                yield _line({"delta": text[len(sent):]})
+                sent = text
+      
+      result = run.result
+    
     await self.usage_service.record(
       user_id=user_id, email=email, model=self.agent.model.model_name, result=result
     )
+    
     answer = result.output
     
+    if len(answer.answer) > len(sent):  # lo que el debounce se dejara por emitir
+      yield _line({"delta": answer.answer[len(sent):]})
+    
+    yield _line({
+      "task_ids": answer.task_ids, "contact_ids": answer.contact_ids, "message_ids": answer.message_ids,
+    })
+    
     logfire.info(
-      "Assistant answered {email} | tasks={tasks} contacts={contacts} messages={messages} | {tokens} tokens",
-      email=email,
-      tasks=answer.task_ids,
-      contacts=answer.contact_ids,
-      messages=answer.message_ids,
-      tokens=result.usage.total_tokens,
+      "Assistant streamed answer to {email} | tasks={tasks} contacts={contacts} messages={messages}",
+      email=email, tasks=answer.task_ids, contacts=answer.contact_ids, messages=answer.message_ids,
     )
-    return answer

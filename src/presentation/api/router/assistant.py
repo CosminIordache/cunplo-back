@@ -1,5 +1,6 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from dependency_injector.wiring import inject, Provide
 from pydantic import BaseModel, Field
 
@@ -23,8 +24,12 @@ class Answer(BaseModel):
   contact_ids: list[str]
   message_ids: list[str]
 
-
-@router.post("/ask", response_model=Answer)
+@router.post("/ask/stream")
 @inject
-async def ask(payload: Question, current: ProUser, service: Service):
-  return await service.ask(current.id, current.email, current.language, payload.question)
+async def ask_stream(payload: Question, current: ProUser, service: Service):
+  """Igual que /ask pero NDJSON: {"delta": "..."} por trozo de texto y una última
+  línea con task_ids / contact_ids / message_ids. El cliente pinta el texto según llega."""
+  return StreamingResponse(
+    service.ask_stream(current.id, current.email, current.language, payload.question),
+    media_type="application/x-ndjson",
+  )
