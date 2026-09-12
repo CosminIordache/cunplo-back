@@ -8,6 +8,7 @@ from pydantic_ai import Agent
 
 from src.application.use_cases.usage_service import UsageService
 from src.domain.task import Status
+from src.domain.usage import UsageKind
 
 @dataclass
 class ExtractedContact:
@@ -109,6 +110,7 @@ class AgentService:
       user_id = user_id,
       email = owner_email,
       model = self.agent.model.model_name,
+      kind = UsageKind.TASK,
       result = result
     )
 

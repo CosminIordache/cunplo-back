@@ -1,3 +1,4 @@
+from contextlib import aclosing
 from typing import Annotated
 
 from dependency_injector.wiring import inject, Provide
@@ -27,8 +28,11 @@ async def transcribe(websocket: WebSocket, current: ProUser, service: Service):
     except WebSocketDisconnect:
       return
 
-  try:
-    async for event in service.stream(audio(), current.id, current.email):
-      await websocket.send_json(event)
-  except WebSocketDisconnect:
-    return
+  # aclosing: si el cliente corta mientras enviamos, el generador se cierra aquí y
+  # su finally (apuntar el coste) corre con el loop vivo, no en el GC
+  async with aclosing(service.stream(audio(), current.id, current.email)) as events:
+    try:
+      async for event in events:
+        await websocket.send_json(event)
+    except WebSocketDisconnect:
+      return

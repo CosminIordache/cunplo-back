@@ -13,6 +13,7 @@ from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 from src.application.use_cases.tools import mongo_tools
 from src.application.use_cases.tools.mongo_tools import MongoDeps
 from src.application.use_cases.usage_service import UsageService
+from src.domain.usage import UsageKind
 
 
 @dataclass
@@ -180,7 +181,11 @@ class AssistantService:
       result = run.result
     
     await self.usage_service.record(
-      user_id=user_id, email=email, model=self.agent.model.model_name, result=result
+      user_id=user_id,
+      email=email,
+      model=self.agent.model.model_name,
+      kind=UsageKind.ASSISTANT,
+      result=result,
     )
     
     answer = result.output
