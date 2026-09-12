@@ -48,29 +48,28 @@ Consulta los datos con la tool `find` (solo lectura): nunca inventes nada. Respo
 IDIOMA que te dan al principio del prompt y resuelve las fechas relativas ("esta semana",
 "mañana") contra la FECHA DE HOY.
 
-Cada llamada a `find` cuesta tiempo: haz las MENOS posibles. Filtra y ordena en la
-consulta (filter + sort + limit) en vez de traer todo y elegir tú; junta varias
-búsquedas en una con $in o $or. Los correos vienen sin body: pídelo solo para el mensaje
-concreto que necesites leer.
+Cada llamada a una tool cuesta tiempo: haz las MENOS posibles, lo normal es UNA.
+- Si la pregunta va de una persona ("qué he hablado con Pablo", "qué tengo con Ana"):
+  `conversations_with` y ya está. Si devuelve candidates, pide aclaración.
+- Si va de tareas por estado, fecha o prioridad: `find` en tasks y, solo si hace falta
+  leer los correos, `thread_context` con los hilos.
+- `find` en messages solo para buscar por asunto o texto. Filtra y ordena en la consulta
+  (filter + sort + limit) en vez de traer todo y elegir tú. Los correos vienen sin body:
+  pídelo solo para el mensaje concreto que necesites leer.
 
 Colecciones y campos:
 - tasks: _id, title, status (todo | waiting_response | done | to_validate), priority
   (low | medium | high | urgent | null), due_at (fecha o null), contact_ids (ids de contacts),
   thread_id, integration_id, created_at, updated_at.
 - contacts: _id, name, email, phone, created_at.
-  Para buscar por nombre o email usa {"$text": {"$search": "pablo"}}.
 - messages: _id, thread_id, integration_id, sender, to, cc, subject, body, internal_date.
   Solo se guardan los correos de hilos que generaron una tarea, no todo el buzón.
-  Para leer el correo de una tarea filtra por su thread_id e integration_id.
-  sender, to y cc son cabeceras crudas ("Ana Pérez <ana@x.com>"): para buscar los correos
-  con una persona usa {"$text": {"$search": "\\"ana@x.com\\""}} (con comillas dentro:
-  frase exacta), que mira sender, to, cc y subject a la vez; busca antes el email en
-  contacts si te dan un nombre. $text solo puede ir una vez y en la raíz del filtro.
+  sender, to y cc son cabeceras crudas ("Ana Pérez <ana@x.com>").
   internal_date es epoch en MILISEGUNDOS: usa HOY EN EPOCH MS del prompt y resta
   86400000 por cada día ("hace 3 días" -> {"internal_date": {"$gte": hoy - 3*86400000}}).
-  Cada mensaje pertenece al hilo de una tarea: cuando respondas con mensajes, busca SIEMPRE
-  su tarea en tasks por (thread_id, integration_id), menciónala en la respuesta e incluye
-  su _id en task_ids. Con varios hilos, una consulta con $or o $in sobre thread_id.
+  Cada mensaje pertenece al hilo de una tarea: cuando respondas con mensajes, ten SIEMPRE
+  su tarea (la trae `thread_context`), menciónala en la respuesta e incluye su _id en
+  task_ids.
 Estados: todo (le toca actuar al dueño), waiting_response (espera a la otra parte),
 done (cerrada), to_validate (pendiente sin saber de quién es el turno).
 
@@ -100,9 +99,16 @@ class AssistantService:
       deps_type=MongoDeps,
       output_type=[AssistantAnswer, Clarification],
       instructions=INSTRUCTIONS,
-      tools=[mongo_tools.find],
-      # sin esto OpenAI no devuelve el razonamiento y no habría nada que emitir
-      model_settings=OpenAIResponsesModelSettings(openai_reasoning_summary="detailed"),
+      tools=[mongo_tools.find, mongo_tools.thread_context, mongo_tools.conversations_with],
+      model_settings=OpenAIResponsesModelSettings(
+        # sin esto OpenAI no devuelve el razonamiento y no habría nada que emitir
+        openai_reasoning_summary="detailed",
+        # ponytail: low basta para consultar y redactar; subir a medium si se equivoca en filtros
+        openai_reasoning_effort="low",
+        # las INSTRUCTIONS y las tools son fijas: con la clave OpenAI enruta al mismo caché
+        # de prefijo y el primer token llega antes. Cambiar la clave al cambiar el prompt.
+        openai_prompt_cache_key="assistant-v2",
+      ),
     )
 
   def _prompt(self, language: str, question: str, clarification: str | None) -> str:

@@ -105,3 +105,107 @@ async def find(
     if isinstance(doc.get("body"), str):
       doc["body"] = doc["body"][:BODY_CHARS]
   return [_encode(d) for d in docs]
+
+
+async def _threads(db, user_id: ObjectId, keys: list[dict], with_body: bool) -> list[dict]:
+  """keys: [{"integration_id", "thread_id"}]. Una entrada por hilo con tarea, correos y contactos."""
+  if not keys:
+    return []
+  query = {"user_id": user_id, "$or": keys}
+  # tres consultas, todas por índice; una sola vuelta del modelo
+  tasks = await db["tasks"].find(query, HIDDEN["tasks"]).to_list(length=MAX_LIMIT)
+  projection = dict(HIDDEN["messages"])
+  if with_body:
+    projection.pop("body")
+  messages = await (
+    db["messages"].find(query, projection).sort("internal_date", 1).to_list(length=MAX_LIMIT)
+  )
+  contact_ids = {c for t in tasks for c in t.get("contact_ids", [])}
+  contacts = await db["contacts"].find(
+    {"user_id": user_id, "_id": {"$in": list(contact_ids)}}, HIDDEN["contacts"]
+  ).to_list(length=MAX_LIMIT)
+  by_id = {c["_id"]: c for c in contacts}
+  task_by_key = {(t["integration_id"], t["thread_id"]): t for t in tasks}
+  result = []
+  for key in keys:
+    pair = (key["integration_id"], key["thread_id"])
+    task = task_by_key.get(pair)
+    thread_messages = [m for m in messages if (m["integration_id"], m["thread_id"]) == pair]
+    for m in thread_messages:
+      if isinstance(m.get("body"), str):
+        m["body"] = m["body"][:BODY_CHARS]
+    result.append({
+      "task": task,
+      "messages": thread_messages,
+      "contacts": [by_id[c] for c in (task or {}).get("contact_ids", []) if c in by_id],
+    })
+  return _encode(result)
+
+
+async def thread_context(
+  ctx: RunContext[MongoDeps],
+  status: str,
+  integration_id: str,
+  thread_ids: list[str],
+  with_body: bool = False,
+) -> list[dict]:
+  """Todo lo de uno o varios hilos EN UNA sola llamada: su tarea, sus correos y sus contactos.
+
+  Úsala en cuanto tengas thread_id e integration_id (p.ej. tras un find en tasks) en vez
+  de encadenar finds. Devuelve una entrada por hilo con
+  {"task": {...} | null, "messages": [...ordenados por fecha...], "contacts": [...]}.
+  - status: frase corta para el usuario, en su idioma, como en find.
+  - integration_id: la cuenta; los thread_ids solo son únicos dentro de ella.
+  - with_body: true solo cuando necesites leer el texto de los correos.
+  """
+  integration = _decode(integration_id)
+  keys = [{"integration_id": integration, "thread_id": t} for t in thread_ids[:MAX_LIMIT]]
+  logfire.info("Assistant thread context: {keys}", keys=keys)
+  return await _threads(ctx.deps.db, ctx.deps.user_id, keys, with_body)
+
+
+async def conversations_with(
+  ctx: RunContext[MongoDeps],
+  status: str,
+  person: str,
+  since: Optional[str] = None,
+  with_body: bool = False,
+) -> dict:
+  """Todo lo hablado con una persona EN UNA sola llamada: sus tareas, correos y contacto.
+
+  Es la tool para "qué he hablado con X", "qué tengo pendiente con X", "el correo de X".
+  - person: nombre o email tal como lo dice el usuario.
+  - since: fecha ISO 8601 opcional; solo hilos con correos desde entonces.
+  - with_body: true solo cuando necesites leer el texto de los correos.
+  Devuelve {"contact": {...} | null, "threads": [...como thread_context...]}. Si hay varios
+  contactos que encajan devuelve {"candidates": [...]} y debes pedir aclaración.
+  """
+  db, user_id = ctx.deps.db, ctx.deps.user_id
+  logfire.info("Assistant conversations with {person}", person=person)
+  # regex acotado por user_id: un usuario tiene decenas de contactos, no hace falta más
+  match = {"$regex": re.escape(person), "$options": "i"}
+  contacts = await db["contacts"].find(
+    {"user_id": user_id, "$or": [{"name": match}, {"email": match}]}, HIDDEN["contacts"]
+  ).to_list(length=10)
+  if len(contacts) > 1:
+    return {"candidates": _encode(contacts)}
+  contact = contacts[0] if contacts else None
+  if contact:
+    # relación ya resuelta por el worker: igualdad por índice, sin buscar texto
+    tasks = await db["tasks"].find(
+      {"user_id": user_id, "contact_ids": contact["_id"]}, {"integration_id": 1, "thread_id": 1}
+    ).to_list(length=MAX_LIMIT)
+    keys = [{"integration_id": t["integration_id"], "thread_id": t["thread_id"]} for t in tasks]
+  else:
+    # ponytail: sin contacto, cabeceras crudas; acotado a los correos del usuario
+    query = {"user_id": user_id, "$or": [{"sender": match}, {"to": match}, {"cc": match}]}
+    messages = await db["messages"].find(
+      query, {"integration_id": 1, "thread_id": 1}
+    ).to_list(length=MAX_LIMIT)
+    keys = list({(m["integration_id"], m["thread_id"]): None for m in messages})
+    keys = [{"integration_id": i, "thread_id": t} for i, t in keys]
+  threads = await _threads(db, user_id, keys, with_body)
+  if since:
+    floor = datetime.fromisoformat(since).timestamp() * 1000
+    threads = [t for t in threads if any(m["internal_date"] >= floor for m in t["messages"])]
+  return {"contact": _encode(contact), "threads": threads}
