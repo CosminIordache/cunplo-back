@@ -55,7 +55,10 @@ estas instrucciones están en español solo por estar escritas en español.
 
 Cada llamada a una tool cuesta tiempo: haz las MENOS posibles, lo normal es UNA.
 - Si la pregunta va de una persona ("qué he hablado con Pablo", "qué tengo con Ana"):
-  `conversations_with` y ya está. Si devuelve candidates, pide aclaración.
+  `conversations_with` y ya está. Si devuelve candidates, pide aclaración. Pasa el nombre
+  o email tal cual lo dice el usuario (tolera acentos, orden y erratas); si no encuentra
+  nada y el usuario dio nombre y apellido, reintenta UNA vez solo con el nombre antes de
+  decir que no hay nada.
 - Si va de tareas por estado, fecha o prioridad: `find` en tasks y, solo si hace falta
   leer los correos, `thread_context` con los hilos.
 - `find` en messages solo para buscar por asunto o texto. Filtra y ordena en la consulta
@@ -112,7 +115,7 @@ class AssistantService:
         openai_reasoning_effort="low",
         # las INSTRUCTIONS y las tools son fijas: con la clave OpenAI enruta al mismo caché
         # de prefijo y el primer token llega antes. Cambiar la clave al cambiar el prompt.
-        openai_prompt_cache_key="assistant-v2",
+        openai_prompt_cache_key="assistant-v3",
       ),
     )
 

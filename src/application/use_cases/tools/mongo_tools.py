@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -6,6 +7,7 @@ from typing import Any, Optional
 import logfire
 from bson import ObjectId
 from pydantic_ai import RunContext
+from rapidfuzz import fuzz, utils
 
 # lo que el asistente puede leer; nada de users ni usages (gasto)
 COLLECTIONS = {"tasks", "contacts", "messages"}
@@ -24,6 +26,34 @@ MAX_LIMIT = 50
 BODY_CHARS = 2000
 
 _OBJECT_ID = re.compile(r"^[0-9a-f]{24}$")
+# ponytail: 75 tolera erratas y acentos sin mezclar "Pablo" con "Paula"; bajar si se queda corto
+FUZZY_CUTOFF = 75
+
+
+def _plain(text: str | None) -> str:
+  """Minúsculas, sin acentos ni signos: "Pablo Ruíz (x)" -> "pablo ruiz x"."""
+  ascii_text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()
+  return utils.default_process(ascii_text)
+
+
+def _match_contacts(person: str, contacts: list[dict]) -> list[dict]:
+  """"Pablo Ruíz (pablo@x.com)" -> contactos cuyo name o email se le parecen. Exacto por email gana."""
+  person = _plain(person)
+  exact = [c for c in contacts if _plain(c.get("email")) == person]
+  if exact:
+    return exact
+  scored = []
+  for c in contacts:
+    score = max(
+      fuzz.token_set_ratio(person, _plain(c.get("name"))),
+      fuzz.token_set_ratio(person, _plain(c.get("email")).replace(".", " ").replace("@", " ")),
+    )
+    scored.append((score, c))
+  best = max((s for s, _ in scored), default=0)
+  if best < FUZZY_CUTOFF:
+    return []
+  # solo los que empatan con el mejor: "Pablo" con dos Pablos -> candidates; con uno -> ese
+  return [c for s, c in scored if s >= best - 5]
 
 
 @dataclass
@@ -182,22 +212,24 @@ async def conversations_with(
   """
   db, user_id = ctx.deps.db, ctx.deps.user_id
   logfire.info("Assistant conversations with {person}", person=person)
-  # regex acotado por user_id: un usuario tiene decenas de contactos, no hace falta más
-  match = {"$regex": re.escape(person), "$options": "i"}
-  contacts = await db["contacts"].find(
-    {"user_id": user_id, "$or": [{"name": match}, {"email": match}]}, HIDDEN["contacts"]
-  ).to_list(length=10)
+  # ponytail: un usuario tiene decenas de contactos: se traen todos y se compara en Python
+  # (acentos, orden de palabras y erratas); Atlas Search si algún día son miles
+  contacts = await db["contacts"].find({"user_id": user_id}, HIDDEN["contacts"]).to_list(length=None)
+  contacts = _match_contacts(person, contacts)
   if len(contacts) > 1:
     return {"candidates": _encode(contacts)}
   contact = contacts[0] if contacts else None
+  keys = []
   if contact:
     # relación ya resuelta por el worker: igualdad por índice, sin buscar texto
     tasks = await db["tasks"].find(
       {"user_id": user_id, "contact_ids": contact["_id"]}, {"integration_id": 1, "thread_id": 1}
     ).to_list(length=MAX_LIMIT)
     keys = [{"integration_id": t["integration_id"], "thread_id": t["thread_id"]} for t in tasks]
-  else:
-    # ponytail: sin contacto, cabeceras crudas; acotado a los correos del usuario
+  if not keys:
+    # sin contacto, o contacto sin tareas enlazadas: cabeceras crudas de los correos
+    needle = contact["email"] if contact else person
+    match = {"$regex": re.escape(needle), "$options": "i"}
     query = {"user_id": user_id, "$or": [{"sender": match}, {"to": match}, {"cc": match}]}
     messages = await db["messages"].find(
       query, {"integration_id": 1, "thread_id": 1}
