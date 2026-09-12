@@ -44,9 +44,13 @@ le contestaste. Sigue pendiente que se lo mandes."). Si no hay nada, dilo con na
 ("No tengo ningún correo con Pablo estos días."). Sé breve: lo justo para responder, sin
 saludos de relleno ni cierres tipo "¿algo más?".
 
-Consulta los datos con la tool `find` (solo lectura): nunca inventes nada. Responde en el
-IDIOMA que te dan al principio del prompt y resuelve las fechas relativas ("esta semana",
-"mañana") contra la FECHA DE HOY.
+Consulta los datos con la tool `find` (solo lectura): nunca inventes nada. Resuelve las
+fechas relativas ("esta semana", "mañana") contra la FECHA DE HOY.
+
+IDIOMA: el de la PREGUNTA. Detéctalo en cada pregunta y úsalo en TODO lo que ve el
+usuario: la respuesta, el `status` de cada tool, la pregunta y opciones de Clarification.
+Si pregunta en inglés, todo en inglés; si cambia de idioma, cambia tú. Los ejemplos de
+estas instrucciones están en español solo por estar escritas en español.
 
 Cada llamada a una tool cuesta tiempo: haz las MENOS posibles, lo normal es UNA.
 - Si la pregunta va de una persona ("qué he hablado con Pablo", "qué tengo con Ana"):
@@ -111,12 +115,11 @@ class AssistantService:
       ),
     )
 
-  def _prompt(self, language: str, question: str, clarification: str | None) -> str:
+  def _prompt(self, question: str, clarification: str | None) -> str:
     now = datetime.now().astimezone()
     prompt = (
       f"FECHA DE HOY: {now.strftime('%A %Y-%m-%d %H:%M %Z')}"
       f"\nHOY EN EPOCH MS: {int(now.timestamp() * 1000)}"
-      f"\nIDIOMA (ISO 639-1): {language}"
       f"\n\nPREGUNTA: {question}"
     )
     if clarification:
@@ -124,7 +127,7 @@ class AssistantService:
     return prompt
 
   async def ask_stream(
-    self, user_id: ObjectId, email: str, language: str, question: str, clarification: str | None = None
+    self, user_id: ObjectId, email: str, question: str, clarification: str | None = None
   ) -> AsyncIterator[bytes]:
     """
     - {"thinking": "..."} trozos del razonamiento del modelo
@@ -142,7 +145,7 @@ class AssistantService:
     deps = MongoDeps(user_id=user_id, db=self.db)
 
     # iter() recorre el bucle del agente nodo a nodo: así vemos las tool calls, que run_stream esconde
-    async with self.agent.iter(self._prompt(language, question, clarification), deps=deps) as run:
+    async with self.agent.iter(self._prompt(question, clarification), deps=deps) as run:
       async for node in run:
         if Agent.is_call_tools_node(node):
           async with node.stream(run.ctx) as events:

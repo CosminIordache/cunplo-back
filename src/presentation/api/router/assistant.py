@@ -33,7 +33,7 @@ async def ask_stream(payload: Question, current: ProUser, service: Service):
   línea con task_ids / contact_ids / message_ids. El cliente pinta el texto según llega."""
   return StreamingResponse(
     service.ask_stream(
-      current.id, current.email, current.language, payload.question, payload.clarification
+      current.id, current.email, payload.question, payload.clarification
     ),
     media_type="application/x-ndjson",
   )

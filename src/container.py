@@ -5,6 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from src.application.use_cases.agent_service import AgentService
 from src.application.use_cases.assistant_agent_service import AssistantService
+from src.application.use_cases.transcription_service import TranscriptionService
 from src.application.use_cases.attachment_service import AttachmentService
 from src.application.use_cases.auth_service import AuthService
 from src.application.use_cases.contact_service import ContactService
@@ -112,6 +113,7 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.api.router.graph",
       "src.presentation.api.router.usage",
       "src.presentation.api.router.assistant",
+      "src.presentation.api.router.transcription",
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
@@ -187,6 +189,7 @@ class Container(containers.DeclarativeContainer):
 
   agent_service = providers.Factory(AgentService, usage_service=usage_service)
   assistant_service = providers.Factory(AssistantService, db=db, usage_service=usage_service)
+  transcription_service = providers.Factory(TranscriptionService, usage_service=usage_service)
 
   # vacío desactiva el push de Outlook, como PUBSUB_TOPIC con Gmail
   config.graph_notification_url.from_env("GRAPH_NOTIFICATION_URL", "")

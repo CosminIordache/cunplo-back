@@ -77,7 +77,7 @@ async def find(
   """Consulta de SOLO LECTURA (find) sobre una colección del usuario.
 
   - collection: "tasks", "contacts" o "messages".
-  - status: frase corta, en el IDIOMA del usuario y en su tono, que describe lo que estás
+  - status: frase corta, en el IDIOMA DE LA PREGUNTA y en su tono, que describe lo que estás
     buscando; se le muestra mientras esperas el resultado. Concreta, sin tecnicismos:
     "Buscando el correo de Pablo", "Mirando qué tienes pendiente para mañana".
   - filter: filtro de Mongo en JSON. Los ids van como string hex de 24 caracteres y las
