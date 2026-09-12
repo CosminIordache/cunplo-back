@@ -59,6 +59,18 @@ async def create_indexes(db) -> None:
   await db["messages"].create_index(
     [("user_id", 1), ("integration_id", 1), ("thread_id", 1), ("internal_date", 1)]
   )
+  # el asistente pide "los últimos correos" sin acotar a un hilo
+  await db["messages"].create_index([("user_id", 1), ("internal_date", -1)])
+  # el asistente busca correos por persona o asunto: $text en vez de $regex, que
+  # recorre todos los mensajes del usuario. Solo cabe un índice de texto por colección.
+  # language none: sin stemming ni stopwords, que en nombres y emails solo estorban
+  await db["messages"].create_index(
+    [("sender", "text"), ("to", "text"), ("cc", "text"), ("subject", "text")],
+    default_language="none",
+  )
+  await db["contacts"].create_index(
+    [("name", "text"), ("email", "text")], default_language="none"
+  )
   # la regla: un hilo, una tarea. La cuenta entra en la clave porque el thread_id
   # solo es único dentro de ella, igual que el provider_id en messages
   await db["tasks"].create_index(
