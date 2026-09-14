@@ -69,7 +69,9 @@ def set_session_cookie(response, token: str) -> None:
 
 
 def decode_token(token: str) -> dict:
-  """Lanza JoseError si el token es inválido o ha expirado."""
+  """Lanza JoseError si la firma es inválida o el token caducó hace más de JWT_TTL.
+  La gracia existe para que el middleware de sesión deslizante pueda renovar un token
+  caducado en vez de mandar al usuario al login: un usuario inactivo 2*JWT_TTL sí cae."""
   decoded = jwt.decode(token, _key, algorithms=[JWT_ALG])
-  jwt.JWTClaimsRegistry(exp={"essential": True}).validate(decoded.claims)
+  jwt.JWTClaimsRegistry(leeway=int(JWT_TTL.total_seconds()), exp={"essential": True}).validate(decoded.claims)
   return decoded.claims

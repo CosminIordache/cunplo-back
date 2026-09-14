@@ -36,9 +36,18 @@ async def create_indexes(db) -> None:
   """create_index es idempotente: se puede llamar en cada arranque."""
   await db["users"].create_index("email", unique=True)
   # la identidad de login es el 'sub' del proveedor, no el email
+  # parcial y no sparse: los usuarios por formulario llevan ambos campos a null y
+  # sparse solo salta el documento si faltan los dos, así que el segundo chocaba
   await db["users"].create_index(
-    [("auth_provider", 1), ("auth_account_id", 1)], unique=True, sparse=True
+    [("auth_provider", 1), ("auth_account_id", 1)],
+    unique=True,
+    name="auth_account",
+    partialFilterExpression={"auth_account_id": {"$type": "string"}},
   )
+  # ponytail: el índice antiguo (sparse) tiene otras opciones y Mongo no lo deja
+  # redefinir; se borra si existe. Quitar cuando ya no quede ningún despliegue con él.
+  if "auth_provider_1_auth_account_id_1" in await db["users"].index_information():
+    await db["users"].drop_index("auth_provider_1_auth_account_id_1")
   # la regla: una integración por usuario, provider y cuenta (multicuenta)
   await db["integrations"].create_index(
     [("user_id", 1), ("provider", 1), ("account_id", 1)], unique=True

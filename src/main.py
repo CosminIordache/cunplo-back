@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from contextlib import asynccontextmanager
+from datetime import datetime, UTC
 
 from fastapi import FastAPI
 import uvicorn
@@ -12,7 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+from joserfc.errors import JoseError
+
 from src.container import Container
+from src.infrastructure.utils.security import COOKIE_NAME, JWT_TTL, create_token, decode_token, set_session_cookie
 from src.infrastructure.driving import gmail_webhook, outlook_webhook
 from src.presentation.api.router import assistant, attachment, auth, contact, graph, integration, message, subscription, task, transcription, usage, user
 
@@ -48,6 +52,26 @@ app.include_router(transcription.router, prefix="/api/v1")
 logfire.configure(environment=os.getenv("ENV"))
 logfire.instrument_system_metrics()
 logfire.instrument_fastapi(app)
+
+
+@app.middleware("http")
+async def renew_session(request, call_next):
+  """Sesión deslizante: si el JWT de la cookie pasó la mitad de su vida (o caducó dentro
+  de la gracia de decode_token), se reemite. Solo un token roto o muy viejo da 401."""
+  response = await call_next(request)
+  token = request.cookies.get(COOKIE_NAME)
+  if token:
+    try:
+      claims = decode_token(token)
+      # ponytail: sin lista de revocación; cerrar sesión = borrar la cookie
+      remaining = claims["exp"] - datetime.now(UTC).timestamp()
+      if remaining < JWT_TTL.total_seconds() / 2:
+        set_session_cookie(response, create_token(claims["sub"]))
+        logfire.info("Session renewed for {user_id} ({remaining}s left)", user_id=claims["sub"], remaining=int(remaining))
+    except (JoseError, KeyError) as error:
+      # roto o caducado fuera de la gracia: el guard ya devolvió 401
+      logfire.warning("Session cookie rejected: {error}", error=repr(error))
+  return response
 
 
 # Sesión firmada (itsdangerous): la necesita el flujo OAuth de Authlib para el state

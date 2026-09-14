@@ -16,6 +16,8 @@ from src.infrastructure.external_services.microsoft_oauth import (
 from src.domain.user import AuthProvider, User
 from src.application.use_cases.auth_service import (
   AuthService,
+  EmailAlreadyUsed,
+  InvalidCredentials,
 )
 from src.application.use_cases.subscription_service import SubscriptionService
 from src.infrastructure.utils.security import COOKIE_DOMAIN, COOKIE_NAME, set_session_cookie
@@ -31,28 +33,32 @@ Subscriptions = Annotated[
 ]
 
 
-# @router.post(
-#   "/register", response_model=SessionOut, status_code=status.HTTP_201_CREATED
-# )
-# @inject
-# async def register(payload: RegisterIn, service: Service, response: Response):
-#   try:
-#     user, token = await service.register(User(**payload.model_dump()))
-#   except EmailAlreadyUsed:
-#     raise HTTPException(status.HTTP_409_CONFLICT, "email already registered")
-#   set_session_cookie(response, token)
-#   return SessionOut(user=UserOut.model_validate(user))
+@router.post(
+  "/register", response_model=SessionOut, status_code=status.HTTP_201_CREATED
+)
+@inject
+async def register(
+  payload: RegisterIn, service: Service, subscriptions: Subscriptions, response: Response
+):
+  try:
+    user, token = await service.register(User(**payload.model_dump()))
+  except EmailAlreadyUsed:
+    raise HTTPException(status.HTTP_409_CONFLICT, "email already registered")
+  
+  await subscriptions.start_trial(user.id)
+  set_session_cookie(response, token)
+  return SessionOut(user=UserOut.model_validate(user))
 
 
-# @router.post("/login", response_model=SessionOut)
-# @inject
-# async def login(payload: LoginIn, service: Service, response: Response):
-#   try:
-#     user, token = await service.login(payload.email, payload.password)
-#   except InvalidCredentials:
-#     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
-#   set_session_cookie(response, token)
-#   return SessionOut(user=UserOut.model_validate(user))
+@router.post("/login", response_model=SessionOut)
+@inject
+async def login(payload: LoginIn, service: Service, response: Response):
+  try:
+    user, token = await service.login(payload.email, payload.password)
+  except InvalidCredentials:
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
+  set_session_cookie(response, token)
+  return SessionOut(user=UserOut.model_validate(user))
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
