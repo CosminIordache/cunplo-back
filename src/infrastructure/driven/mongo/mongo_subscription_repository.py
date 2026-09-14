@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 from typing import Optional
 
 from bson import ObjectId
@@ -48,3 +48,28 @@ class MongoSubscriptionRepository:
   async def delete_by_user(self, user_id: ObjectId) -> bool:
     result = await self.collection.delete_one({"user_id": user_id})
     return result.deleted_count > 0
+
+  async def stats(self) -> dict:
+    """Cuántos hay en cada estado, con el mismo derivado que
+    Subscription.current_status: CANCELED manda, luego caduca expires_at, luego el guardado."""
+    now = datetime.now(UTC)
+    derived = {
+      "$switch": {
+        "branches": [
+          {"case": {"$eq": ["$status", SubscriptionStatus.CANCELED]}, "then": SubscriptionStatus.CANCELED},
+          {"case": {"$lte": ["$expires_at", now]}, "then": SubscriptionStatus.EXPIRED},
+        ],
+        "default": "$status",
+      }
+    }
+    # expires_at null nunca es <= now en Mongo, así que un plan sin caducidad cae al default
+    by_status = {s: 0 for s in SubscriptionStatus}
+    async for row in self.collection.aggregate(
+      [{"$group": {"_id": derived, "count": {"$sum": 1}}}]
+    ):
+      by_status[row["_id"]] = row["count"]
+    trials_expiring = await self.collection.count_documents({
+      "status": SubscriptionStatus.TRIALING,
+      "expires_at": {"$gt": now, "$lte": now + timedelta(days=7)},
+    })
+    return {"by_status": by_status, "trials_expiring_7_days": trials_expiring}

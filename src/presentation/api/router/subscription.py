@@ -6,7 +6,7 @@ from dependency_injector.wiring import inject, Provide
 from src.container import Container
 from src.application.use_cases.subscription_service import SubscriptionService
 from src.domain.user import Role
-from src.presentation.api.schemas.subscription import PlanUpdate, SubscriptionOut
+from src.presentation.api.schemas.subscription import PlanUpdate, SubscriptionOut, SubscriptionStatsOut
 from src.presentation.middleware.auth import CurrentUser, get_current_user, AdminUser
 from src.presentation.utils.to_object_id import ObjectIdParam
 
@@ -29,6 +29,12 @@ async def my_subscription(service: Service, current: CurrentUser):
     # cuentas anteriores al trial: se les abre aquí en vez de migrar a mano
     subscription = await service.start_trial(current.id)
   return subscription
+
+
+@router.get("/stats", response_model=SubscriptionStatsOut)
+@inject
+async def subscription_stats(service: Service, admin: AdminUser):
+  return await service.stats()
 
 
 @router.patch("/{user_id}", response_model=SubscriptionOut)

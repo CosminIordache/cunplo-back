@@ -73,3 +73,6 @@ class UserService:
 
   async def delete(self, user_id: ObjectId) -> bool:
     return await self.repository.delete(user_id)
+
+  async def stats(self) -> dict:
+    return await self.repository.stats()

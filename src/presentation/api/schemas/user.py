@@ -37,3 +37,12 @@ class UserOut(BaseModel):
   role: str = Role.USER
   created_at: datetime
   updated_at: datetime
+
+
+class UserStatsOut(BaseModel):
+  """El embudo de registro, para el admin."""
+
+  total: int
+  new_last_30_days: int
+  onboarded: int
+  with_integration: int  # con al menos un buzón conectado

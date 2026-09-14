@@ -45,3 +45,6 @@ class SubscriptionService:
 
   async def delete_by_user(self, user_id: ObjectId) -> bool:
     return await self.repository.delete_by_user(user_id)
+
+  async def stats(self) -> dict:
+    return await self.repository.stats()

@@ -1,6 +1,6 @@
 from typing import Optional
 from dataclasses import asdict
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -22,6 +22,7 @@ def _to_user(document: dict) -> User:
 class MongoUserRepository:
   def __init__(self, db: AsyncIOMotorDatabase):
     self.collection = db["users"]
+    self.integrations = db["integrations"]  # solo para stats: cuántos han conectado buzón
 
   async def create(self, user: User) -> User:
     await self.collection.insert_one(_to_document(user))
@@ -57,3 +58,14 @@ class MongoUserRepository:
   async def delete(self, user_id: ObjectId) -> bool:
     result = await self.collection.delete_one({"_id": user_id})
     return result.deleted_count == 1
+
+  async def stats(self) -> dict:
+    """El embudo: registrados -> onboarding hecho -> buzón conectado.
+    ponytail: cuatro counts sueltos, no un $facet; son colecciones pequeñas."""
+    since = datetime.now(UTC) - timedelta(days=30)
+    return {
+      "total": await self.collection.count_documents({}),
+      "new_last_30_days": await self.collection.count_documents({"created_at": {"$gte": since}}),
+      "onboarded": await self.collection.count_documents({"onboarded": True}),
+      "with_integration": len(await self.integrations.distinct("user_id")),
+    }

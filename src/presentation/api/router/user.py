@@ -12,8 +12,8 @@ from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
 from src.presentation.api.router.integration import disconnect_integration
 from src.infrastructure.utils.security import COOKIE_NAME
-from src.presentation.api.schemas.user import UserUpdate, UserOut
-from src.presentation.middleware.auth import CurrentUser, get_current_user
+from src.presentation.api.schemas.user import UserStatsOut, UserUpdate, UserOut
+from src.presentation.middleware.auth import AdminUser, CurrentUser, get_current_user
 from src.presentation.utils.to_object_id import ObjectIdParam
 
 # Todo /users exige Bearer válido
@@ -38,6 +38,13 @@ Subscriptions = Annotated[
 @inject
 async def list_users(service: Service):
   return await service.list()
+
+
+@router.get("/stats", response_model=UserStatsOut)
+@inject
+async def user_stats(service: Service, admin: AdminUser):
+  """Va antes de /{id}: si no, "stats" se intenta convertir a ObjectId."""
+  return await service.stats()
 
 
 @router.get("/{id}", response_model=UserOut)

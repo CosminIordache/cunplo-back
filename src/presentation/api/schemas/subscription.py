@@ -23,3 +23,10 @@ class SubscriptionOut(BaseModel):
 class PlanUpdate(BaseModel):
   plan: Plan
   days: Optional[int] = None  # None: sin caducidad
+
+
+class SubscriptionStatsOut(BaseModel):
+  """Cuántos hay por estado real (el derivado, no el guardado)."""
+
+  by_status: dict[SubscriptionStatus, int]
+  trials_expiring_7_days: int
