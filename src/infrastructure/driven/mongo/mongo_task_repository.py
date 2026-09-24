@@ -24,17 +24,21 @@ class MongoTaskRepository:
     self.collection = db["tasks"]
 
   async def upsert(self, task: Task) -> Task:
-    """Un hilo, una tarea: el segundo correo del hilo actualiza en vez de duplicar.
-    La cuenta entra en la clave porque el thread_id solo es único dentro de ella."""
+    """Por id: el job decide si el correo actualiza una tarea del hilo o crea otra.
+    Usuario, cuenta e hilo van en el filtro: un id ajeno al hilo no toca nada, inserta."""
     task.updated_at = datetime.now(UTC)
     document = _to_document(task)
     document.pop("_id")
     document.pop("created_at")
+    # priority va en el $set a propósito: el agente no la pone, así que cada actualización
+    # la deja en null. La prioridad es la urgencia del dueño para actuar; cuando el correo
+    # cambia la tarea (p.ej. ya enviaste y ahora esperas al cliente) esa urgencia ya no vale.
     # Los contactos se acumulan en vez de sustituirse: el agente solo mira el correo
     # nuevo, y los de correos anteriores del hilo ya no vuelven a salir.
     contact_ids = document.pop("contact_ids")
     doc = await self.collection.find_one_and_update(
       {
+        "_id": task.id,
         "user_id": task.user_id,
         "integration_id": task.integration_id,
         "thread_id": task.thread_id,
@@ -42,7 +46,7 @@ class MongoTaskRepository:
       {
         "$set": document,
         "$addToSet": {"contact_ids": {"$each": contact_ids}},
-        "$setOnInsert": {"_id": task.id, "created_at": task.created_at},
+        "$setOnInsert": {"created_at": task.created_at},
       },
       upsert=True,
       return_document=True,
@@ -55,11 +59,11 @@ class MongoTaskRepository:
 
   async def get_by_thread(
     self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
-  ) -> Optional[Task]:
-    doc = await self.collection.find_one(
+  ) -> list[Task]:
+    cursor = self.collection.find(
       {"user_id": user_id, "integration_id": integration_id, "thread_id": thread_id}
-    )
-    return _to_task(doc) if doc else None
+    ).sort("created_at", 1)
+    return [_to_task(d) async for d in cursor]
 
   async def get_by_user(
     self, user_id: ObjectId, status: Optional[Status] = None, skip: int = 0, limit: int = 0

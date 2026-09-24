@@ -75,9 +75,9 @@ Colecciones y campos:
   sender, to y cc son cabeceras crudas ("Ana Pérez <ana@x.com>").
   internal_date es epoch en MILISEGUNDOS: usa HOY EN EPOCH MS del prompt y resta
   86400000 por cada día ("hace 3 días" -> {"internal_date": {"$gte": hoy - 3*86400000}}).
-  Cada mensaje pertenece al hilo de una tarea: cuando respondas con mensajes, ten SIEMPRE
-  su tarea (la trae `thread_context`), menciónala en la respuesta e incluye su _id en
-  task_ids.
+  Cada mensaje pertenece a un hilo con tareas; un hilo puede tener VARIAS, una por acción.
+  Cuando respondas con mensajes, ten SIEMPRE sus tareas (las trae `thread_context`),
+  menciona las que vengan al caso e incluye sus _id en task_ids.
 Estados: todo (le toca actuar al dueño), waiting_response (espera a la otra parte),
 done (cerrada), to_validate (pendiente sin saber de quién es el turno).
 

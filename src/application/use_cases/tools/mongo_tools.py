@@ -138,7 +138,7 @@ async def find(
 
 
 async def _threads(db, user_id: ObjectId, keys: list[dict], with_body: bool) -> list[dict]:
-  """keys: [{"integration_id", "thread_id"}]. Una entrada por hilo con tarea, correos y contactos."""
+  """keys: [{"integration_id", "thread_id"}]. Una entrada por hilo con sus tareas, correos y contactos."""
   if not keys:
     return []
   query = {"user_id": user_id, "$or": keys}
@@ -155,19 +155,25 @@ async def _threads(db, user_id: ObjectId, keys: list[dict], with_body: bool) -> 
     {"user_id": user_id, "_id": {"$in": list(contact_ids)}}, HIDDEN["contacts"]
   ).to_list(length=MAX_LIMIT)
   by_id = {c["_id"]: c for c in contacts}
-  task_by_key = {(t["integration_id"], t["thread_id"]): t for t in tasks}
+  # un hilo puede llevar varias tareas, una por acción
+  tasks_by_key: dict = {}
+  for t in tasks:
+    tasks_by_key.setdefault((t["integration_id"], t["thread_id"]), []).append(t)
   result = []
   for key in keys:
     pair = (key["integration_id"], key["thread_id"])
-    task = task_by_key.get(pair)
+    thread_tasks = tasks_by_key.get(pair, [])
     thread_messages = [m for m in messages if (m["integration_id"], m["thread_id"]) == pair]
     for m in thread_messages:
       if isinstance(m.get("body"), str):
         m["body"] = m["body"][:BODY_CHARS]
     result.append({
-      "task": task,
+      "tasks": thread_tasks,
       "messages": thread_messages,
-      "contacts": [by_id[c] for c in (task or {}).get("contact_ids", []) if c in by_id],
+      "contacts": [
+        by_id[c] for c in dict.fromkeys(c for t in thread_tasks for c in t.get("contact_ids", []))
+        if c in by_id
+      ],
     })
   return _encode(result)
 
@@ -179,11 +185,12 @@ async def thread_context(
   thread_ids: list[str],
   with_body: bool = False,
 ) -> list[dict]:
-  """Todo lo de uno o varios hilos EN UNA sola llamada: su tarea, sus correos y sus contactos.
+  """Todo lo de uno o varios hilos EN UNA sola llamada: sus tareas, sus correos y sus contactos.
 
   Úsala en cuanto tengas thread_id e integration_id (p.ej. tras un find en tasks) en vez
   de encadenar finds. Devuelve una entrada por hilo con
-  {"task": {...} | null, "messages": [...ordenados por fecha...], "contacts": [...]}.
+  {"tasks": [...], "messages": [...ordenados por fecha...], "contacts": [...]}.
+  Un hilo puede tener varias tareas, una por acción.
   - status: frase corta para el usuario, en su idioma, como en find.
   - integration_id: la cuenta; los thread_ids solo son únicos dentro de ella.
   - with_body: true solo cuando necesites leer el texto de los correos.

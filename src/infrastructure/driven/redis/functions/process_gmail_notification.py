@@ -7,6 +7,7 @@ from src.domain.contact import Contact
 from src.domain.integration import Provider
 from src.domain.message import Message
 from src.domain.task import Task
+from src.application.use_cases.task_service import existing_task_id
 
 
 def _to_agent_message(message: dict) -> AgentEmailMessage:
@@ -102,12 +103,17 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
       user_id, integration.id, thread_id
     )
 
+    thread_tasks = await ctx["task_service"].get_by_thread(
+      user_id, integration.id, thread_id
+    )
+
     extracted = await ctx["agent_service"].run_tasks(
       user_id=user_id,
       owner_email=email,
       task_language=user.task_language,
       thread_messages=[_stored_to_agent_message(m) for m in stored] or None,
       new_message=_to_agent_message(message),
+      thread_tasks=thread_tasks,
     )
 
     if not extracted:
@@ -133,16 +139,31 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
     # solo los correos que son tarea llevan sus adjuntos al bucket
     await ctx["attachment_service"].store_for_message(integration, stored_message, message)
 
-    await ctx["task_service"].upsert(
-      Task(
+    # varias tareas por hilo: el agente dice cuál actualiza (task_id) y cuál es nueva
+    for item in extracted:
+      task_id = existing_task_id(item.task_id, thread_tasks)
+      if item.task_id and not task_id:
+        logfire.warning(
+          "Agent returned unknown task {task_id} for thread {thread_id}, created as new",
+          task_id=item.task_id,
+          thread_id=thread_id,
+        )
+      task = Task(
         user_id=user_id,
         integration_id=integration.id,
         thread_id=thread_id,
-        title=extracted.title,
-        status=extracted.status,
-        due_at=extracted.due_at,
-
-        contact_ids=await _resolve_contacts(ctx, user_id, email, extracted.contacts),
+        title=item.title,
+        status=item.status,
+        due_at=item.due_at,
+        contact_ids=await _resolve_contacts(ctx, user_id, email, item.contacts),
       )
-    )
-    logfire.info("Task upserted for thread {thread_id} (user {user_id})", thread_id=thread_id, user_id=user_id)
+      if task_id:
+        task.id = task_id
+      await ctx["task_service"].upsert(task)
+      logfire.info(
+        "Task {task_id} {action} for thread {thread_id} (user {user_id})",
+        task_id=task.id,
+        action="updated" if task_id else "created",
+        thread_id=thread_id,
+        user_id=user_id,
+      )
