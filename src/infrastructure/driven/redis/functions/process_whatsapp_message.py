@@ -55,8 +55,10 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
     thread_id = message["thread_id"]
     logfire.info("Processing WhatsApp message {message_id} for {phone} (user {user_id})", message_id=message["id"], phone=phone, user_id=user_id)
 
-    if user and user.only_contacts and not await is_known_contact(ctx, user_oid, message["sender"]):
-      logfire.info("Message {message_id} from a non-contact, skipped", message_id=message["id"])
+    # en un mensaje propio el contacto que cuenta es el destinatario
+    counterpart = message["to"] if message["sender"] == phone else message["sender"]
+    if user and user.only_contacts and not await is_known_contact(ctx, user_oid, counterpart):
+      logfire.info("Message {message_id} with a non-contact, skipped", message_id=message["id"])
       return
 
     stored = await ctx["message_service"].list_by_thread_id_user_id(user_oid, integration.id, thread_id)

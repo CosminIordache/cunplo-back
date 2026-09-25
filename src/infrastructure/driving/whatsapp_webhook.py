@@ -42,9 +42,8 @@ async def whatsapp_push(request: Request, queue: Queue, repository: Repository):
 
   event = json.loads(body)
   payload = event.get("payload") or {}
-  # ponytail: los mensajes del propio dueño no se analizan (una llamada al LLM menos por
-  # respuesta); si hace falta que su "te lo envío mañana" cambie el estado, quitar el filtro
-  if event.get("event") != "message" or payload.get("is_from_me"):
+  # los mensajes del propio dueño también se analizan: su "te lo envío mañana" cambia la tarea
+  if event.get("event") != "message":
     return Response(status_code=status.HTTP_200_OK)
   if (payload.get("chat_id") or "").endswith(IGNORED_CHATS):
     return Response(status_code=status.HTTP_200_OK)

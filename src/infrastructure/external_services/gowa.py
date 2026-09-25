@@ -108,15 +108,20 @@ def _epoch_ms(timestamp: str) -> int:
 def to_message(payload: dict, owner_phone: str) -> dict:
   """El payload de un evento 'message' al mismo dict que gmail._to_message y
   outlook._to_message: aguas abajo solo cambia el canal."""
-  sender = payload.get("from") or ""
-  name = payload.get("sender_display_name") or payload.get("from_name") or ""
-  address = jid_to_phone(sender) or sender
+  chat = payload["chat_id"]
+  if payload.get("is_from_me"):
+    # lo escribe el dueño: el remitente es su número y el destinatario, la otra persona
+    sender, to = owner_phone, jid_to_phone(chat) or chat
+  else:
+    address = jid_to_phone(payload.get("from") or "") or payload.get("from") or ""
+    name = payload.get("sender_display_name") or payload.get("from_name") or ""
+    sender, to = (f"{name} <{address}>" if name else address), owner_phone
   return {
     "id": payload["id"],
     # el hilo es la conversación: un chat 1:1 es el JID de la otra persona
-    "thread_id": payload["chat_id"],
-    "sender": f"{name} <{address}>" if name else address,
-    "to": owner_phone,
+    "thread_id": chat,
+    "sender": sender,
+    "to": to,
     "cc": "",
     "subject": "",
     "body": payload.get("body") or "",
