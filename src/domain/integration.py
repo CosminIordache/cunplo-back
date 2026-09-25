@@ -9,6 +9,7 @@ from bson import ObjectId
 class Provider(StrEnum):
   GOOGLE = "google"
   MICROSOFT = "microsoft"
+  WHATSAPP = "whatsapp"
 
 
 @dataclass
@@ -16,8 +17,8 @@ class Integration:
 
   user_id: ObjectId
   provider: Provider
-  account_id: str  # 'sub' del proveedor: estable aunque el usuario cambie de email
-  email: str
+  account_id: str  # 'sub' del proveedor (en WhatsApp, el device_id de GOWA): estable aunque cambie el email
+  email: str  # en WhatsApp, el número en E.164; vacío hasta que se vincula el teléfono
   scopes: list[str]
   refresh_token: Optional[str]  # cifrado en el repositorio, nunca en claro en Mongo
   access_token: Optional[str] = None

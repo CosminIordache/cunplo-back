@@ -5,6 +5,7 @@ from dependency_injector.wiring import inject, Provide
 from src.container import Container
 from src.application.use_cases.contact_service import (
   ContactEmailAlreadyUsed,
+  ContactPhoneAlreadyUsed,
   ContactService,
 )
 from src.domain.contact import Contact
@@ -28,6 +29,8 @@ async def create_contact(payload: ContactCreate, service: Service, current: Curr
     return await service.create(contact)
   except ContactEmailAlreadyUsed:
     raise HTTPException(status.HTTP_409_CONFLICT, "contact email already used")
+  except ContactPhoneAlreadyUsed:
+    raise HTTPException(status.HTTP_409_CONFLICT, "contact phone already used")
 
 
 @router.get("", response_model=list[ContactOut])
@@ -39,7 +42,7 @@ async def list_contacts(
   skip: int = 0,
   limit: int = 25,
 ):
-  """search filtra por nombre o email (subcadena, case-insensitive)."""
+  """search filtra por nombre, email o teléfono (subcadena, case-insensitive)."""
   return await service.get_by_user(current.id, search, skip, limit)
 
 
@@ -64,6 +67,8 @@ async def update_contact(
     contact = await service.update(id, current.id, changes)
   except ContactEmailAlreadyUsed:
     raise HTTPException(status.HTTP_409_CONFLICT, "contact email already used")
+  except ContactPhoneAlreadyUsed:
+    raise HTTPException(status.HTTP_409_CONFLICT, "contact phone already used")
   if not contact:
     raise HTTPException(status.HTTP_404_NOT_FOUND, "contact not found")
   return contact

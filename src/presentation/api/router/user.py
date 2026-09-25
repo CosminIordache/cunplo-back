@@ -7,6 +7,7 @@ from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.outlook_service import OutlookService
+from src.application.use_cases.whatsapp_service import WhatsAppService
 from src.application.use_cases.subscription_service import SubscriptionService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
@@ -25,6 +26,7 @@ router = APIRouter(
 Service = Annotated[UserService, Depends(Provide[Container.user_service])]
 Gmail = Annotated[GmailService, Depends(Provide[Container.gmail_service])]
 Outlook = Annotated[OutlookService, Depends(Provide[Container.outlook_service])]
+WhatsApp = Annotated[WhatsAppService, Depends(Provide[Container.whatsapp_service])]
 Integrations = Annotated[
   IntegrationService, Depends(Provide[Container.integration_service])
 ]
@@ -114,6 +116,7 @@ async def delete_user(
   subscriptions: Subscriptions,
   gmail_service: Gmail,
   outlook_service: Outlook,
+  whatsapp_service: WhatsApp,
   current: CurrentUser,
   response: Response,
 ):
@@ -121,7 +124,7 @@ async def delete_user(
     raise HTTPException(status.HTTP_403_FORBIDDEN, "not your user")
   # primero las integraciones: si el borrado falla, mejor sobra una revocación que un acceso vivo
   for integration in await integrations.list_by_user(id):
-    await disconnect_integration(integration, gmail_service, outlook_service)
+    await disconnect_integration(integration, gmail_service, outlook_service, whatsapp_service)
   # ponytail: cascada secuencial sin transacción; si falla a medias quedan huérfanos
   # por user_id — pasar a una transacción cuando Mongo sea replica set
   await tasks.delete_all_by_user(id)  # se lleva también los mensajes

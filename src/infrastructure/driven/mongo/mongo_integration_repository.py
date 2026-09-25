@@ -63,6 +63,11 @@ class MongoIntegrationRepository:
     doc = await self.collection.find_one({"provider": provider, "email": email})
     return _to_integration(doc) if doc else None
 
+  async def get_by_account(self, provider: Provider, account_id: str) -> Optional[Integration]:
+    # el webhook de WhatsApp solo trae el device_id de GOWA, que es el account_id
+    doc = await self.collection.find_one({"provider": provider, "account_id": account_id})
+    return _to_integration(doc) if doc else None
+
   async def get_by_subscription(self, subscription_id: str) -> Optional[Integration]:
     # el webhook de Graph solo trae el id de la subscription: es la única entrada
     doc = await self.collection.find_one({"subscription_id": subscription_id})

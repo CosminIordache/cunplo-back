@@ -1,6 +1,7 @@
 import os
 import logfire
 from arq import cron
+from arq.worker import func
 from arq.connections import RedisSettings, create_pool
 
 from src.infrastructure.driven.redis.functions.process_gmail_notification import (
@@ -9,7 +10,11 @@ from src.infrastructure.driven.redis.functions.process_gmail_notification import
 from src.infrastructure.driven.redis.functions.process_outlook_sync import (
   process_outlook_sync,
 )
+from src.infrastructure.driven.redis.functions.process_whatsapp_message import (
+  process_whatsapp_message,
+)
 from src.infrastructure.driven.redis.functions.renew_watches import renew_watches
+from src.infrastructure.driven.redis.functions.mailbox_lock import MAX_TRIES
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -66,7 +71,12 @@ async def shutdown(ctx) -> None:
 class WorkerSettings:
   """Arranca con: uv run arq src.infrastructure.driven.redis.worker.WorkerSettings"""
 
-  functions = [process_gmail_notification, process_outlook_sync]
+  # los jobs de buzón se reintentan mientras otro del mismo buzón tiene el lock (mailbox_lock)
+  functions = [
+    func(process_gmail_notification, max_tries=MAX_TRIES),
+    func(process_outlook_sync, max_tries=MAX_TRIES),
+    process_whatsapp_message,
+  ]
   # Graph solo da ~3 días de subscription: diario a las 4:00 va sobrado
   cron_jobs = [cron(renew_watches, hour=4, minute=0)]
   redis_settings = REDIS

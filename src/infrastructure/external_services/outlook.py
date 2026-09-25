@@ -14,11 +14,17 @@ class OutlookError(Exception):
   """Graph respondió con un error."""
 
 
+class OutlookRateLimited(OutlookError):
+  """Graph nos está frenando (429): se reintenta más tarde."""
+
+
 class DeltaTooOld(OutlookError):
   """El deltaLink caducó: toca resincronizar desde el estado actual."""
 
 
 def _check(response: httpx.Response) -> httpx.Response:
+  if response.status_code == 429:
+    raise OutlookRateLimited(f"Graph API 429: {response.text[:200]}")
   if response.is_error:
     raise OutlookError(f"Graph API {response.status_code}: {response.text[:200]}")
   return response

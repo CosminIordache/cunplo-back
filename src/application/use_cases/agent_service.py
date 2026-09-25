@@ -1,7 +1,7 @@
 import logfire
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from bson import ObjectId
 from pydantic_ai import Agent
@@ -14,7 +14,7 @@ from src.domain.usage import UsageKind
 class ExtractedContact:
   """Contact sin ids: el LLM no puede rellenar un ObjectId."""
 
-  email: str
+  email: Optional[str] = None  # null en WhatsApp: ahí la persona se identifica por teléfono
   name: Optional[str] = None
   phone: Optional[str] = None
 
@@ -37,9 +37,12 @@ class AgentEmailMessage:
   subject: str
   body: str
   cc: Optional[str] = None
+  channel: Literal["email", "whatsapp"] = "email"
 
 INSTRUCTIONS = """
-Llevas el control del trabajo pendiente de un autónomo o pequeño negocio a partir de su correo.
+Llevas el control del trabajo pendiente de un autónomo o pequeño negocio a partir de su correo
+y de su WhatsApp. Los mensajes de WhatsApp empiezan por "Canal: WhatsApp"; el resto son correos.
+Las reglas son las mismas en los dos canales salvo donde se indica.
 Una tarea es una acción concreta: lo que el dueño del buzón todavía debe hacer, o lo que espera.
 Un hilo puede llevar VARIAS tareas: si un correo pide dos cosas distintas ("envíame el
 presupuesto y confírmame la fecha"), son dos tareas. No partas una misma acción en pasos.
@@ -81,13 +84,16 @@ Campos:
   identifican claramente a la persona que escribe ("Un saludo, Ana Pérez"), sí es un
   contacto: usa ese email genérico como email y el nombre de la persona como name. Lo que
   descartas es la empresa sin nadie detrás, no a la persona que escribe desde ella.
-  - email: OBLIGATORIO. Sin email no hay contacto; si solo tienes un nombre suelto, descártalo.
+  - email: OBLIGATORIO en el correo. Sin email no hay contacto; si solo tienes un nombre
+    suelto, descártalo. En WhatsApp déjalo null salvo que el mensaje escriba un email.
   - name: el nombre y apellidos de la persona. Sácalo de la firma, del display name de la
     cabecera ("Ana Pérez <ana@x.com>") o del cuerpo. Si no aparece por ningún sitio, déjalo
     null. Nunca inventes ni deduzcas un nombre a partir del email, y nunca pongas el nombre
     de la empresa como name.
   - phone: el teléfono de la persona si aparece en la firma o en el cuerpo. Si no, null.
     No uses el teléfono general de la empresa como teléfono de la persona.
+    En WhatsApp el teléfono es OBLIGATORIO: es el número entre <> del remitente, copiado tal
+    cual con su "+". Ahí no descartes a alguien por no tener email.
 - due_at: solo cuando el hilo da una fecha concreta. Nunca la inventes ni la estimes.
   Resuelve las fechas relativas ("mañana", "la semana que viene", "el viernes") contra la
   FECHA DE HOY que te dan al principio del prompt, tomando como referencia el correo nuevo.
@@ -100,6 +106,10 @@ crear otra.
 Si el correo nuevo no crea ni cambia ninguna tarea, devuelve una lista vacía. No te inventes
 una para rellenar.
 Newsletters, marketing, notificaciones, recibos y un simple 'gracias' no llevan tarea.
+WhatsApp: los mensajes son cortos y no tienen asunto; el hilo es la conversación con esa
+persona. Un "ok", "vale", "👍" o un saludo no llevan tarea, salvo que cierren o confirmen una
+de las TAREAS DEL HILO. Varios mensajes seguidos suelen ser una sola petición partida en
+trozos: no crees una tarea por trozo.
 Si dudas de quién es la acción, usa TO_VALIDATE en vez de adivinar.
 """
 
@@ -181,6 +191,8 @@ class AgentService:
     )
 
   def _format(self, message: AgentEmailMessage) -> str:
+    if message.channel == "whatsapp":
+      return f"Canal: WhatsApp\nFrom: {message.sender}\nTo: {message.to}\n\nMessage body: {message.body}"
     return (
       f"From: {message.sender}\nTo: {message.to}\nCc: {message.cc}\n"
       f"Subject: {message.subject}\n\nMessage body: {message.body}"

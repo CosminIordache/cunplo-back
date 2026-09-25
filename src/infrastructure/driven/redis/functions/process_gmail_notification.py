@@ -1,9 +1,10 @@
 import logfire
+from arq import Retry
 
 from src.application.use_cases.agent_service import AgentEmailMessage
-from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact
-from src.application.use_cases.contact_service import ContactEmailAlreadyUsed
-from src.domain.contact import Contact
+from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact, resolve_contacts
+from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
+from src.infrastructure.external_services.gmail import GmailRateLimited
 from src.domain.integration import Provider
 from src.domain.message import Message
 from src.domain.task import Task
@@ -33,35 +34,19 @@ def _stored_to_agent_message(message: Message) -> AgentEmailMessage:
   )
 
 
-async def _resolve_contacts(ctx, user_id, own_email: str, extracted_contacts) -> list:
-  """Los contactos del agente a ids: crea los que no existen todavía."""
-  contact_ids = []
-  for extracted in extracted_contacts:
-    # el usuario no es contacto de sí mismo, lo diga el agente o no
-    if extracted.email.lower() == own_email.lower():
-      continue
-
-    contact = await ctx["contact_service"].get_by_email(user_id, extracted.email)
-    if not contact:
-      try:
-        contact = await ctx["contact_service"].create(
-          Contact(
-            user_id=user_id,
-            email=extracted.email,
-            name=extracted.name,
-            phone=extracted.phone,
-          )
-        )
-        logfire.info("Contact {email} created for user {user_id}", email=extracted.email, user_id=user_id)
-      except ContactEmailAlreadyUsed:
-        # carrera con otro job del mismo hilo: el que perdió vuelve a leerlo
-        contact = await ctx["contact_service"].get_by_email(user_id, extracted.email)
-    contact_ids.append(contact.id)
-  return contact_ids
-
-
 async def process_gmail_notification(ctx, email: str, history_id: str) -> None:
-  """El job que el worker desencola: analiza los correos nuevos y guarda los que son tarea."""
+  """El job que el worker desencola: analiza los correos nuevos y guarda los que son tarea.
+  Uno por buzón a la vez (mailbox_lock); si Gmail corta por cuota, se reintenta en un minuto."""
+  async with mailbox_lock(ctx, f"gmail:{email}"):
+    try:
+      await _process_notification(ctx, email, history_id)
+    except GmailRateLimited:
+      # el history_id no avanzó: el reintento recoge los mismos correos
+      logfire.warning("Gmail quota exceeded for {email}, retrying in 60s", email=email)
+      raise Retry(defer=60)
+
+
+async def _process_notification(ctx, email: str, history_id: str) -> None:
   with logfire.span(
     "process_gmail_notification {email}", email=email, history_id=history_id
   ) as span:
@@ -155,7 +140,7 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
         title=item.title,
         status=item.status,
         due_at=item.due_at,
-        contact_ids=await _resolve_contacts(ctx, user_id, email, item.contacts),
+        contact_ids=await resolve_contacts(ctx, user_id, email, item.contacts),
       )
       if task_id:
         task.id = task_id

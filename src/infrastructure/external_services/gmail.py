@@ -12,12 +12,20 @@ class GmailError(Exception):
   """Gmail respondió con un error. Envuelve el HTTPStatusError de httpx."""
 
 
+class GmailRateLimited(GmailError):
+  """Cuota por usuario agotada (429, o 403 'Quota exceeded'): se reintenta más tarde."""
+
+
 class MessageNotFound(GmailError):
   """El correo ya no está: borrado o movido entre que el historial lo anunció y lo pedimos."""
 
 
 def _check(response: httpx.Response) -> httpx.Response:
   """Traduce el error crudo de httpx a uno nuestro, con el detalle de Gmail."""
+  if response.status_code == 429 or (
+    response.status_code == 403 and ("quota exceeded" in response.text.lower() or "ratelimitexceeded" in response.text.lower())
+  ):
+    raise GmailRateLimited(f"Gmail API {response.status_code}: {response.text[:200]}")
   if response.is_error:
     raise GmailError(f"Gmail API {response.status_code}: {response.text[:200]}")
   return response

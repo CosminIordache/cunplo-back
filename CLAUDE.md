@@ -29,8 +29,8 @@ Hexagonal layering under `src/`, wired by `dependency-injector`:
 - `application/use_cases/` — services taking their ports in `__init__`. `user_service`, `message_service`, `contact_service` are near pass-through; `auth_service`, `integration_service`, `gmail_service`, `outlook_service`, `task_service` and `agent_service` hold the real rules.
 - `infrastructure/driven/mongo/` — repositories. They hold the only `id` ⟷ `_id` mapping (`_to_document` / `_to_<entity>`).
 - `infrastructure/driven/redis/` — `worker.py` (arq `WorkerSettings` + the `redis_pool` provider) and `functions/` (the enqueued jobs and the cron).
-- `infrastructure/driving/` — the two push webhooks (`gmail_webhook.py`, `outlook_webhook.py`). Inbound adapters, mounted as routers but deliberately not under `presentation/`.
-- `infrastructure/external_services/` — HTTP/OAuth clients: `gmail.py`, `outlook.py` (Graph), `google_oauth.py`, `microsoft_oauth.py`, and `oauth_refresh.py` (a provider → refresher dict).
+- `infrastructure/driving/` — the three push webhooks (`gmail_webhook.py`, `outlook_webhook.py`, `whatsapp_webhook.py`). Inbound adapters, mounted as routers but deliberately not under `presentation/`.
+- `infrastructure/external_services/` — HTTP/OAuth clients: `gmail.py`, `outlook.py` (Graph), `google_oauth.py`, `microsoft_oauth.py`, `oauth_refresh.py` (a provider → refresher dict), and `gowa.py` (WhatsApp, see below).
 - `infrastructure/utils/` — `security.py` (scrypt hashing, HS256 JWT via joserfc, the session cookie helpers) and `crypto.py` (Fernet, used only by the integration repository).
 - `presentation/api/` — `router/` (endpoints) and `schemas/` (Pydantic models, separate from domain dataclasses); `middleware/auth.py` holds the cookie guard.
 
@@ -73,11 +73,20 @@ A user may have **several accounts per provider**. The unique key is `(user_id, 
 
 `disconnect` is per-provider and is the only delete path. Gmail stops the watch and revokes the grant at Google; Outlook deletes the Graph subscription (Microsoft exposes no per-token revoke — the user withdraws consent from their account). Both tolerate a dead token: log, delete anyway. `router/integration.py:disconnect_integration` picks the right one from the row's provider, and `DELETE /users/{id}` reuses it — deleting a user must not leave a live grant behind.
 
+### WhatsApp (GOWA)
+
+WhatsApp is a third `Provider`, served by a separate [GOWA](https://github.com/aldinokemal/go-whatsapp-web-multidevice) instance (Railway) that `gowa.py` calls with Basic Auth. One GOWA **device** = one number = one `Integration`, with `account_id` = device_id and `email` = the number in E.164. No OAuth, no tokens, no push to renew — GOWA keeps the session. **The `Integration` only exists once a number is linked**: the pending device lives in GOWA alone, and its id is `<user_id>_<ObjectId>` so `device_owner` can tell whose it is without a Mongo row. `_pending_device` reuses the user's unlinked device, so abandoned QR attempts don't pile up. Linking is `POST /integrations/whatsapp/connect` (QR as a data URL — GOWA's QR link is behind its Basic Auth, so we fetch it) or `/connect/code` (pairing code, for users on the same phone); both return a `device_id` and the frontend polls `GET /integrations/whatsapp/{device_id}/status`, which creates the integration (`activate`, idempotent) the first time GOWA reports a JID. The webhook never creates one: with GOWA down during a disconnect, it would resurrect the account.
+
+The webhook is set **per device** when `_pending` creates it (`webhook_url` = `WHATSAPP_WEBHOOK_URL`, `webhook_secret` = `GOWA_WEBHOOK_SECRET`, events `message`), like Graph's subscription — GOWA itself needs no webhook config and only sends us our own devices. The URL is stored in each device: if the API domain changes, existing devices need `PATCH /devices/{id}/webhook`. GOWA signs with HMAC-SHA256 over the raw body (`X-Hub-Signature-256`); it finds the row by `session_id` (= account_id, indexed `(provider, account_id)`) or, failing that, by the device JID's number. Unlike mail, the payload already carries the message, so `process_whatsapp_message` has no sync step. Own messages, groups/broadcasts/newsletters and non-text messages are dropped in the webhook. Jobs are enqueued with `_job_id=wa:<integration>:<message>` because GOWA retries.
+
+Contacts: `Contact.email` is optional — a WhatsApp contact has only a phone (E.164, `normalize_phone` in `contact_service.py`). Both `(user_id, email)` and `(user_id, phone)` are unique **partial** indexes. `resolve_contacts` / `is_known_contact` in `contacts_filter.py` are shared by the three jobs and look up by email, else by phone; an email contact whose phone already belongs to someone else (a switchboard) is created without the phone.
+
 ### Mail → task pipeline
 
 ```
 Gmail push  → POST /webhooks/gmail   → enqueue process_gmail_notification(email, history_id)
 Graph push  → POST /webhooks/outlook → enqueue process_outlook_sync(integration_id, user_id)
+GOWA push   → POST /webhooks/whatsapp → enqueue process_whatsapp_message(integration_id, user_id, message)
                                      → <service>.sync/process_notification → new messages
                                      → AgentService.run_tasks(thread context + new mail)
                                      → upsert Message + upsert Task + resolve/create Contacts
@@ -85,7 +94,9 @@ Graph push  → POST /webhooks/outlook → enqueue process_outlook_sync(integrat
 
 Both webhooks return 2xx almost unconditionally — a non-2xx makes the provider retry. Gmail auth is a shared `?token=` (`PUBSUB_TOKEN`); Graph's is `clientState` in the body (`GRAPH_CLIENT_STATE`), plus the `?validationToken=` echo Graph requires to register a subscription at all. Graph's notification carries only a `subscriptionId`, which is why `subscription_id` is uniquely indexed and `get_by_subscription` exists.
 
-The two job modules (`process_gmail_notification.py`, `process_outlook_sync.py`) are near-duplicates by design — they differ only in how messages are fetched. Keep them in sync when changing the downstream logic.
+The Gmail and Outlook jobs run **one per mailbox at a time** (`mailbox_lock.py`, a Redis lock on `ctx["redis"]`): Gmail sends a push per mailbox change, and parallel jobs all read the same stored marker and downloaded the same mails, burning the per-user quota (`Units per minute per user`). A job that finds the lock taken raises `Retry(defer=10)` and, when it gets in, the marker has moved on, so it is cheap; that is why both are registered with `func(..., max_tries=MAX_TRIES)`. Quota errors (`GmailRateLimited` — 429 or a 403 quota/rateLimitExceeded — and `OutlookRateLimited` — 429) become `Retry(defer=60)`; the marker has not advanced, so the retry picks the same mails up.
+
+The three job modules (`process_gmail_notification.py`, `process_outlook_sync.py`, `process_whatsapp_message.py`) are near-duplicates by design — they differ only in how messages are fetched. Keep them in sync when changing the downstream logic.
 
 `AgentService` (pydantic-ai, OpenAI) gets the thread's existing tasks plus the new mail and returns `list[ExtractedTask]` (empty = nothing). The rules live in the `INSTRUCTIONS` prompt in `agent_service.py` — that prompt is the specification of what a task is, so behaviour changes belong there, not in the callers. **A thread may carry several tasks, one per distinct action.** The agent returns only the tasks the new mail creates or changes: an item with `task_id` updates that task, one without creates a new one, and untouched tasks are not returned. `existing_task_id` in `task_service.py` accepts a `task_id` only if it belongs to the thread; an unknown id is logged and created as new. `upsert` goes by `_id` with user, account and thread in the filter. Only messages that produced a task are stored, and deleting the **last** task of a thread deletes its messages (earlier deletes keep them as context for the rest).
 
@@ -98,7 +109,7 @@ Push expires on both sides (Gmail 7 days, Graph ~3). The daily `renew_watches` c
 Env vars are read at import time from `.env` via `load_dotenv()` — in `src/main.py` for the API and again in `worker.py`, since the worker is a separate process.
 
 - Required, raise at import: `JWT_SECRET`, `ENCRYPTION_KEY` (a Fernet key). `CORS_ORIGINS` is `.split(",")` unconditionally and will `AttributeError` if unset.
-- Optional: `MONGO_URI` / `MONGO_DB` (`mongodb://localhost:27017`, `cunplo`), `REDIS_URI` (`redis://localhost:6379`), `JWT_TTL_DAYS` (1), `COOKIE_SECURE` / `COOKIE_DOMAIN`, `GOOGLE_CLIENT_ID` / `GOOGLE_SECRET`, `MS_CLIENT_ID` / `MS_SECRET`, `PUBSUB_TOPIC` (empty disables the Gmail watch), `PUBSUB_TOKEN`, `GRAPH_NOTIFICATION_URL` (empty disables Graph push), `GRAPH_CLIENT_STATE`, `FRONTEND_REDIRECT`, `SESSION_SECRET`, `ENV` (Logfire environment), `OPENAI_API_KEY`.
+- Optional: `MONGO_URI` / `MONGO_DB` (`mongodb://localhost:27017`, `cunplo`), `REDIS_URI` (`redis://localhost:6379`), `JWT_TTL_DAYS` (1), `COOKIE_SECURE` / `COOKIE_DOMAIN`, `GOOGLE_CLIENT_ID` / `GOOGLE_SECRET`, `MS_CLIENT_ID` / `MS_SECRET`, `PUBSUB_TOPIC` (empty disables the Gmail watch), `PUBSUB_TOKEN`, `GRAPH_NOTIFICATION_URL` (empty disables Graph push), `GRAPH_CLIENT_STATE`, `GOWA_URL` / `GOWA_BASIC_AUTH` (`user:pass`) / `GOWA_WEBHOOK_SECRET` / `WHATSAPP_WEBHOOK_URL` (the public `/api/v1/webhooks/whatsapp`; both are registered on each GOWA device, and linking a number fails if either is empty), `FRONTEND_REDIRECT`, `SESSION_SECRET`, `ENV` (Logfire environment), `OPENAI_API_KEY`.
 
 Mongo and Redis being down are logged, not fatal — both processes start either way (`queue` is then `None`).
 
@@ -112,7 +123,7 @@ Mirror an existing slice across all five layers: domain dataclass → port Proto
 
 ## Tests
 
-`asyncio_mode = "auto"` — async tests need no marker. The suite was deleted at some point; the only file left is `tests/tasks/test_thread_tasks.py`, which pins the several-tasks-per-thread rules (`existing_task_id`, messages kept until the last task goes) with in-memory fakes and no conftest.
+`asyncio_mode = "auto"` — async tests need no marker. The suite was deleted at some point; the only file is `tests/test_whatsapp.py` (webhook signature, payload mapping, phone normalization, contact resolution by phone) with in-memory fakes and no conftest. It calls `load_dotenv()` itself because it imports the container.
 
 If you add more tests, the shape that worked before was: no database and no network, a root `client` fixture applying `provider.override(...)` around a `TestClient` from a per-entity `overrides` dict, in-memory fakes for the repositories, and `monkeypatch.setattr` on the `gmail` / `outlook` modules (patch the module attribute, not the import inside the service).
 

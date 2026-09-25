@@ -38,6 +38,11 @@ class MongoContactRepository:
     doc = await self.collection.find_one({"user_id": user_id, "email": email})
     return _to_contact(doc) if doc else None
 
+  async def get_by_phone(self, user_id: ObjectId, phone: str) -> Optional[Contact]:
+    """El equivalente de get_by_email para WhatsApp, donde no hay email."""
+    doc = await self.collection.find_one({"user_id": user_id, "phone": phone})
+    return _to_contact(doc) if doc else None
+
   async def get_by_user(
     self, user_id: ObjectId, search: Optional[str] = None, skip: int = 0, limit: int = 0
   ) -> list[Contact]:
@@ -46,7 +51,7 @@ class MongoContactRepository:
     if search:
       # ponytail: regex case-insensitive sin índice; text index si la colección crece
       pattern = {"$regex": re.escape(search), "$options": "i"}
-      filter["$or"] = [{"name": pattern}, {"email": pattern}]
+      filter["$or"] = [{"name": pattern}, {"email": pattern}, {"phone": pattern}]
     cursor = self.collection.find(filter).sort("name", 1).skip(skip)
     if limit:
       cursor = cursor.limit(limit)

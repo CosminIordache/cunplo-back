@@ -2,6 +2,7 @@ import logfire
 import os
 from dependency_injector import containers, providers
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import OperationFailure
 
 from src.application.use_cases.agent_service import AgentService
 from src.application.use_cases.assistant_agent_service import AssistantService
@@ -18,6 +19,7 @@ from src.application.use_cases.subscription_service import SubscriptionService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.usage_service import UsageService
 from src.application.use_cases.user_service import UserService
+from src.application.use_cases.whatsapp_service import WhatsAppService
 from src.infrastructure.driven.mongo.mongo_attachment_repository import MongoAttachmentRepository
 from src.infrastructure.driven.mongo.mongo_contact_repository import MongoContactRepository
 from src.infrastructure.driven.mongo.mongo_graph_repository import MongoGraphRepository
@@ -54,6 +56,8 @@ async def create_indexes(db) -> None:
   )
   # el webhook de Gmail busca por email; no es único, la misma cuenta vale para varios usuarios
   await db["integrations"].create_index([("provider", 1), ("email", 1)])
+  # el webhook de WhatsApp solo trae el device_id de GOWA, que es nuestro account_id
+  await db["integrations"].create_index([("provider", 1), ("account_id", 1)])
   # el webhook de Graph solo trae el id de la subscription
   # único: con varias cuentas de Microsoft dos filas no pueden compartir subscription
   # parcial y no sparse: el campo existe con null en las filas sin suscripción (Gmail, o
@@ -84,8 +88,27 @@ async def create_indexes(db) -> None:
   await db["tasks"].create_index([("user_id", 1), ("status", 1), ("due_at", 1)])
   # el asistente responde "qué he hablado con X" por las tareas en las que X participa
   await db["tasks"].create_index([("user_id", 1), ("contact_ids", 1)])
-  # un contacto por usuario y email: el mismo email puede ser cliente de dos usuarios
-  await db["contacts"].create_index([("user_id", 1), ("email", 1)], unique=True)
+  # un contacto por usuario y email: el mismo email puede ser cliente de dos usuarios.
+  # Parcial: los contactos de WhatsApp no tienen email y varios null chocarían en un único.
+  # Mongo no cambia opciones de un índice existente: el viejo (no parcial) se borra antes
+  email_key = [("user_id", 1), ("email", 1)]
+  old_email_index = (await db["contacts"].index_information()).get("user_id_1_email_1")
+  if old_email_index and "partialFilterExpression" not in old_email_index:
+    await db["contacts"].drop_index("user_id_1_email_1")
+  await db["contacts"].create_index(
+    email_key, unique=True, partialFilterExpression={"email": {"$type": "string"}}
+  )
+  # lo mismo por teléfono: WhatsApp busca el contacto por número (E.164)
+  try:
+    await db["contacts"].create_index(
+      [("user_id", 1), ("phone", 1)],
+      unique=True,
+      partialFilterExpression={"phone": {"$type": "string"}},
+    )
+  except OperationFailure as error:
+    # ponytail: contactos anteriores con el mismo teléfono impiden el único; se sigue sin él
+    # (ContactService también lo comprueba). Deduplicar a mano y reiniciar para crearlo.
+    logfire.warning("Unique contact phone index not created: {error}", error=error)
   # el $lookup del grafo casa solo por email; sin este índice escanea todo contacts
   await db["contacts"].create_index("email")
   # el id del adjunto solo es único dentro de su mensaje: la pareja evita duplicar
@@ -131,6 +154,7 @@ class Container(containers.DeclarativeContainer):
 
       "src.infrastructure.driving.gmail_webhook",
       "src.infrastructure.driving.outlook_webhook",
+      "src.infrastructure.driving.whatsapp_webhook",
     ]
   )
 
@@ -221,4 +245,14 @@ class Container(containers.DeclarativeContainer):
     repository=integration_repository,
     integrations=integration_service,
     topic=config.pubsub_topic,
+  )
+
+  # el webhook se registra en cada device de GOWA al crearlo, como la subscription de Graph
+  config.whatsapp_webhook_url.from_env("WHATSAPP_WEBHOOK_URL", "")
+  config.gowa_webhook_secret.from_env("GOWA_WEBHOOK_SECRET", "")
+  whatsapp_service = providers.Factory(
+    WhatsAppService,
+    repository=integration_repository,
+    webhook_url=config.whatsapp_webhook_url,
+    secret=config.gowa_webhook_secret,
   )
