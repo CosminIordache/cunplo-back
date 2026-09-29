@@ -109,7 +109,8 @@ Newsletters, marketing, notificaciones, recibos y un simple 'gracias' no llevan 
 WhatsApp: los mensajes son cortos y no tienen asunto; el hilo es la conversación con esa
 persona. Un "ok", "vale", "👍" o un saludo no llevan tarea, salvo que cierren o confirmen una
 de las TAREAS DEL HILO. Varios mensajes seguidos suelen ser una sola petición partida en
-trozos: no crees una tarea por trozo.
+trozos: no crees una tarea por trozo. Por eso en WhatsApp el CORREO NUEVO puede traer
+varios mensajes seguidos (la ráfaga desde el último análisis): analízalos juntos.
 Si dudas de quién es la acción, usa TO_VALIDATE en vez de adivinar.
 """
 
@@ -129,9 +130,11 @@ class AgentService:
     owner_email: str,
     task_language: str,
     thread_messages: Optional[List[AgentEmailMessage]],
-    new_message: AgentEmailMessage,
+    new_messages: List[AgentEmailMessage],
     thread_tasks: Optional[List[Task]] = None,
   ) -> List[ExtractedTask]:
+    # un correo es un mensaje; WhatsApp manda la ráfaga entera
+    new_message = new_messages[-1]
     logfire.info(
       "Agent analyzing thread {thread_id} ({previous} previous mails, {tasks} tasks) from {sender} for owner {owner}",
       thread_id=new_message.thread_id,
@@ -141,7 +144,7 @@ class AgentService:
       owner=owner_email,
     )
     result = await self.agent.run(
-      self._prompt(owner_email, task_language, thread_messages, new_message, thread_tasks)
+      self._prompt(owner_email, task_language, thread_messages, new_messages, thread_tasks)
     )
     
     await self.usage_service.record(
@@ -171,11 +174,12 @@ class AgentService:
     owner_email: str,
     task_language: str,
     thread_messages: Optional[List[AgentEmailMessage]],
-    new_message: AgentEmailMessage,
+    new_messages: List[AgentEmailMessage],
     thread_tasks: Optional[List[Task]] = None,
   ) -> str:
 
     context = "\n\n---\n\n".join(self._format(m) for m in thread_messages or [])
+    new = "\n\n---\n\n".join(self._format(m) for m in new_messages)
     tasks = "\n".join(
       f"- task_id={t.id} | status={t.status} | title={t.title} | due_at={t.due_at}"
       for t in thread_tasks or []
@@ -187,7 +191,7 @@ class AgentService:
       f"\nIDIOMA DE LA TAREA (ISO 639-1): {task_language}"
       f"\n\nTAREAS DEL HILO:\n{tasks or '(el hilo no tiene tareas todavía)'}"
       f"\n\nHILO PREVIO (contexto):\n\n{context or '(no hay correos previos)'}"
-      f"\n\n=== CORREO NUEVO ===\n\n{self._format(new_message)}"
+      f"\n\n=== CORREO NUEVO ===\n\n{new}"
     )
 
   def _format(self, message: AgentEmailMessage) -> str:

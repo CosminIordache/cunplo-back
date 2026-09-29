@@ -75,7 +75,8 @@ class WorkerSettings:
   functions = [
     func(process_gmail_notification, max_tries=MAX_TRIES),
     func(process_outlook_sync, max_tries=MAX_TRIES),
-    process_whatsapp_message,
+    # el análisis de un chat también va con lock (mailbox_lock): uno a la vez por chat
+    func(process_whatsapp_message, max_tries=MAX_TRIES),
   ]
   # Graph solo da ~3 días de subscription: diario a las 4:00 va sobrado
   cron_jobs = [cron(renew_watches, hour=4, minute=0)]

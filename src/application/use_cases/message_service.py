@@ -31,6 +31,10 @@ class MessageService:
     await self.attachments.delete_by_messages(user_id, [message_id])
     return await self.repository.delete(message_id, user_id)
 
+  async def delete_many(self, user_id: ObjectId, message_ids: list[ObjectId]) -> int:
+    await self.attachments.delete_by_messages(user_id, message_ids)
+    return await self.repository.delete_many(user_id, message_ids)
+
   async def delete_by_thread(
     self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
   ) -> int:

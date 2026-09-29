@@ -49,6 +49,10 @@ class MongoMessageRepository:
     result = await self.collection.delete_one({"_id": message_id, "user_id": user_id})
     return result.deleted_count == 1
 
+  async def delete_many(self, user_id: ObjectId, message_ids: list[ObjectId]) -> int:
+    result = await self.collection.delete_many({"_id": {"$in": message_ids}, "user_id": user_id})
+    return result.deleted_count
+
   async def delete_all_by_user(self, user_id: ObjectId) -> int:
     result = await self.collection.delete_many({"user_id": user_id})
     return result.deleted_count

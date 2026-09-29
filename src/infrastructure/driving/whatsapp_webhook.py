@@ -13,6 +13,11 @@ from src.application.ports.integration_repository import IntegrationRepository
 from src.container import Container
 from src.domain.integration import Provider
 from src.infrastructure.external_services.gowa import jid_to_phone, to_message
+from src.infrastructure.driven.redis.functions.process_whatsapp_message import (
+  DEBOUNCE_SECONDS,
+  KEY_TTL_SECONDS,
+  last_key,
+)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -71,11 +76,17 @@ async def whatsapp_push(request: Request, queue: Queue, repository: Repository):
   assert integration.phone  # la entidad lo exige en WhatsApp
   message = to_message(payload, integration.phone)
   # el _job_id deduplica: GOWA reintenta el mismo mensaje y no queremos pagar dos veces el LLM
-  await queue.enqueue_job(
+  job = await queue.enqueue_job(
     "process_whatsapp_message",
     str(integration.id),
     str(integration.user_id),
     message,
     _job_id=f"wa:{integration.id}:{message['id']}",
+    _defer_by=DEBOUNCE_SECONDS,
   )
+  # debounce: el mensaje pasa a ser el último del chat y solo analiza el job cuyo mensaje
+  # sigue siéndolo (process_whatsapp_message). Un reintento deduplicado no lo marca: su job
+  # ya no existe y dejaría la ráfaga sin nadie que la analice
+  if job:
+    await queue.set(last_key(str(integration.id), message["thread_id"]), message["id"], ex=KEY_TTL_SECONDS)
   return Response(status_code=status.HTTP_200_OK)

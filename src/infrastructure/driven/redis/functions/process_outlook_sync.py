@@ -96,7 +96,7 @@ async def _sync(ctx, integration_id: str, user_id: str) -> None:
         owner_email=email,
         task_language=user.task_language,
         thread_messages=[_stored_to_agent_message(m) for m in stored] or None,
-        new_message=_to_agent_message(message),
+        new_messages=[_to_agent_message(message)],
         thread_tasks=thread_tasks,
       )
 
