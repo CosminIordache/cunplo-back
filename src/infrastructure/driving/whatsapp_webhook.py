@@ -52,7 +52,7 @@ async def whatsapp_push(request: Request, queue: Queue, repository: Repository):
     return Response(status_code=status.HTTP_200_OK)
 
   # session_id es el device_id que registramos, nuestro account_id. Si GOWA no lo
-  # puede mapear, queda device_id: el JID del número, que es el email de la fila.
+  # puede mapear, queda device_id: el JID del número, que es el phone de la fila.
   # Sin integración se ignora: aquí no se crea (resucitaría una cuenta desconectada con
   # GOWA caído); la crea /status mientras el usuario vincula
   integration = None
@@ -60,7 +60,7 @@ async def whatsapp_push(request: Request, queue: Queue, repository: Repository):
     integration = await repository.get_by_account(Provider.WHATSAPP, event["session_id"])
   phone = jid_to_phone(event.get("device_id") or "")
   if not integration and phone:
-    integration = await repository.get_by_email(Provider.WHATSAPP, phone)
+    integration = await repository.get_by_phone(Provider.WHATSAPP, phone)
   if not integration:
     logfire.warning(
       "WhatsApp message for device {device_id}: not connected, ignored",
@@ -68,7 +68,8 @@ async def whatsapp_push(request: Request, queue: Queue, repository: Repository):
     )
     return Response(status_code=status.HTTP_200_OK)
 
-  message = to_message(payload, integration.email)
+  assert integration.phone  # la entidad lo exige en WhatsApp
+  message = to_message(payload, integration.phone)
   # el _job_id deduplica: GOWA reintenta el mismo mensaje y no queremos pagar dos veces el LLM
   await queue.enqueue_job(
     "process_whatsapp_message",

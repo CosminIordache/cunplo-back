@@ -72,7 +72,7 @@ class WhatsAppService:
         user_id=user_id,
         provider=Provider.WHATSAPP,
         account_id=device_id,
-        email=phone,
+        phone=phone,
         scopes=[],
         refresh_token=None,
       )
@@ -89,7 +89,7 @@ class WhatsAppService:
       # GOWA caído o el device ya no existe: borramos igual, como Gmail y Outlook
       logfire.warning(
         "Could not remove the GOWA device for {phone}: {error}",
-        phone=integration.email,
+        phone=integration.phone,
         error=error,
       )
     return await self.repository.delete(integration.id, integration.user_id)

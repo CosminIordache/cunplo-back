@@ -45,7 +45,8 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
       logfire.warning("Integration {integration_id} is gone, message skipped", integration_id=integration_id)
       return
 
-    phone = integration.email
+    phone = integration.phone
+    assert phone  # la entidad lo exige en WhatsApp
     subscription = await ctx["subscription_service"].get_by_user(user_oid)
     if not (subscription and subscription.is_active):
       logfire.info("User {user_id} has no active subscription, skipped", user_id=user_id)

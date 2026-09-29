@@ -56,6 +56,13 @@ async def create_indexes(db) -> None:
   )
   # el webhook de Gmail busca por email; no es único, la misma cuenta vale para varios usuarios
   await db["integrations"].create_index([("provider", 1), ("email", 1)])
+  # ponytail: las filas de WhatsApp anteriores guardaban el número en 'email'; se mueve a
+  # 'phone' en cada arranque (idempotente). Quitar cuando no quede ninguna sin migrar.
+  await db["integrations"].update_many(
+    {"provider": "whatsapp", "phone": {"$exists": False}}, {"$rename": {"email": "phone"}}
+  )
+  # el webhook de WhatsApp busca por número si no trae session_id
+  await db["integrations"].create_index([("provider", 1), ("phone", 1)])
   # el webhook de WhatsApp solo trae el device_id de GOWA, que es nuestro account_id
   await db["integrations"].create_index([("provider", 1), ("account_id", 1)])
   # el webhook de Graph solo trae el id de la subscription

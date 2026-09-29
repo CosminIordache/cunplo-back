@@ -13,7 +13,8 @@ class IntegrationOut(BaseModel):
   id: Annotated[str, BeforeValidator(str)]
   provider: str
   account_id: str
-  email: str
+  email: Optional[str] = None  # correo (Google, Microsoft)
+  phone: Optional[str] = None  # WhatsApp, en E.164
   scopes: list[str]
   created_at: datetime
   updated_at: datetime
