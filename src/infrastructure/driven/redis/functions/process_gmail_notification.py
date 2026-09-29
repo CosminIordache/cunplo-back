@@ -101,7 +101,9 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
       thread_tasks=thread_tasks,
     )
 
-    if not extracted:
+    # el agente solo filtra el correo que abriría un hilo (spam, newsletters…): un hilo
+    # que ya tiene tareas guarda todos sus correos, sean tarea o no, como su contexto
+    if not extracted and not thread_tasks:
       logfire.info("Message {message_id} for {email} carries no task, skipped", message_id=message["id"], email=email)
       continue
 
@@ -121,7 +123,7 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
     )
     logfire.info("Message {message_id} saved for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
 
-    # solo los correos que son tarea llevan sus adjuntos al bucket
+    # solo los correos que se guardan llevan sus adjuntos al bucket
     await ctx["attachment_service"].store_for_message(integration, stored_message, message)
 
     # varias tareas por hilo: el agente dice cuál actualiza (task_id) y cuál es nueva
