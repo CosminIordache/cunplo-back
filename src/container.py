@@ -118,6 +118,9 @@ async def create_indexes(db) -> None:
     logfire.warning("Unique contact phone index not created: {error}", error=error)
   # el $lookup del grafo casa solo por email; sin este índice escanea todo contacts
   await db["contacts"].create_index("email")
+  # los dos de arriba son parciales: un find por user_id a secas no puede usarlos y escaneaba
+  # la colección entera (conversations_with del asistente, el listado de contactos)
+  await db["contacts"].create_index("user_id")
   # el id del adjunto solo es único dentro de su mensaje: la pareja evita duplicar
   # al reprocesarse el mismo correo
   await db["attachments"].create_index([("message_id", 1), ("attachment_id", 1)], unique=True)
@@ -232,7 +235,8 @@ class Container(containers.DeclarativeContainer):
   usage_service = providers.Factory(UsageService, repository=usage_repository)
 
   agent_service = providers.Factory(AgentService, usage_service=usage_service)
-  assistant_service = providers.Factory(AssistantService, db=db, usage_service=usage_service)
+  # Singleton: montar el Agent (esquemas de tools, cliente de OpenAI) costaba ~40% de CPU por pregunta
+  assistant_service = providers.Singleton(AssistantService, db=db, usage_service=usage_service)
   transcription_service = providers.Factory(TranscriptionService, usage_service=usage_service)
 
   # vacío desactiva el push de Outlook, como PUBSUB_TOPIC con Gmail

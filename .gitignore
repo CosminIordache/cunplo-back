@@ -10,3 +10,4 @@ wheels/
 .venv
 .env
 .env.dev
+loadtest/tokens.txt
