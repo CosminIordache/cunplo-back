@@ -9,6 +9,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 # From/To/Cc normal; los nombres entre comillas con '@' dentro darían un falso
 # positivo, que al no existir en contacts se descarta solo
 EMAIL = r"[\w.!#$%&'*+/=?^_`{|}~-]+@[\w-]+(?:\.[\w-]+)+"
+# Los de WhatsApp: el mensaje guarda los números en E.164 (jid_to_phone)
+PHONE = r"\+\d{7,15}"
 
 
 class MongoGraphRepository:
@@ -32,7 +34,7 @@ class MongoGraphRepository:
         "foreignField": "_id",
         "as": "contacts",
         # solo lo que se pinta: el cuerpo del contacto no viaja
-        "pipeline": [{"$project": {"email": 1, "name": 1}}],
+        "pipeline": [{"$project": {"email": 1, "name": 1, "phone": 1}}],
       }},
       {"$lookup": {
         "from": "messages",
@@ -51,14 +53,14 @@ class MongoGraphRepository:
           # el cuerpo del correo no viaja: en el grafo solo se pinta la cabecera
           {"$project": {
             "sender": 1, "subject": 1, "internal_date": 1,
-            "emails": {"$map": {
+            "addresses": {"$map": {
               "input": {"$regexFindAll": {
                 "input": {"$concat": [
                   {"$ifNull": ["$sender", ""]}, " ",
                   {"$ifNull": ["$to", ""]}, " ",
                   {"$ifNull": ["$cc", ""]},
                 ]},
-                "regex": EMAIL,
+                "regex": f"{EMAIL}|{PHONE}",
               }},
               # los contactos se guardan siempre en minúsculas
               "as": "m", "in": {"$toLower": "$$m.match"},
@@ -66,14 +68,21 @@ class MongoGraphRepository:
           }},
           {"$lookup": {
             "from": "contacts",
-            "localField": "emails",
-            "foreignField": "email",
+            "let": {"addresses": "$addresses"},
             "as": "participants",
             # el dueño del buzón y los que nunca llegaron a contacto no salen:
-            # el $lookup solo casa con lo que existe en contacts
+            # el $lookup solo casa con lo que existe en contacts. Nada de
+            # localField: con un array vacío Mongo lo trata como null y casaba
+            # con todos los contactos sin email, o sea, todos los de WhatsApp
             "pipeline": [
-              {"$match": {"$expr": {"$eq": ["$user_id", user_id]}}},
-              {"$project": {"email": 1, "name": 1}},
+              {"$match": {"$expr": {"$and": [
+                {"$eq": ["$user_id", user_id]},
+                {"$or": [
+                  {"$in": ["$email", "$$addresses"]},
+                  {"$in": ["$phone", "$$addresses"]},
+                ]},
+              ]}}},
+              {"$project": {"email": 1, "name": 1, "phone": 1}},
             ],
           }},
         ],
@@ -93,7 +102,7 @@ class MongoGraphRepository:
         "contacts": {"$map": {"input": "$contacts", "as": "c", "in": {
           "id": {"$toString": "$$c._id"},
           "type": "contact",
-          "label": {"$ifNull": ["$$c.name", "$$c.email"]},
+          "label": {"$ifNull": ["$$c.name", "$$c.email", "$$c.phone"]},
           "email": "$$c.email",
         }}},
         "messages": {"$map": {"input": "$messages", "as": "m", "in": {
@@ -116,7 +125,7 @@ class MongoGraphRepository:
             "as": "p", "in": {
               "id": {"$toString": "$$p._id"},
               "type": "contact",
-              "label": {"$ifNull": ["$$p.name", "$$p.email"]},
+              "label": {"$ifNull": ["$$p.name", "$$p.email", "$$p.phone"]},
               "email": "$$p.email",
             },
           }},
