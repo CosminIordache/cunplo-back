@@ -2,6 +2,7 @@ import logfire
 from arq import Retry
 
 from src.application.use_cases.agent_service import AgentEmailMessage
+from src.infrastructure.driven.redis.functions.events import ERROR, NO_TASK, NOT_CONTACT, PROCESSED, PROCESSING, SKIPPED, publish
 from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact, resolve_contacts
 from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
 from src.infrastructure.external_services.gmail import GmailRateLimited
@@ -80,78 +81,89 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
   for message in messages:
     thread_id = message["thread_id"]
     logfire.info("Processing message {message_id} for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
+    event = {"integration_id": integration.id, "provider": integration.provider, "thread_id": thread_id, "message_id": message["id"], "subject": message["subject"]}
+    await publish(ctx, user_id, PROCESSING, **event)
+    try:
 
-    if only_contacts and not await is_known_contact(ctx, user_id, message["sender"]):
-      logfire.info("Message {message_id} from a non-contact, skipped", message_id=message["id"], email=email)
-      continue
+      if only_contacts and not await is_known_contact(ctx, user_id, message["sender"]):
+        logfire.info("Message {message_id} from a non-contact, skipped", message_id=message["id"], email=email)
+        await publish(ctx, user_id, SKIPPED, reason=NOT_CONTACT, **event)
+        continue
 
-    stored = await ctx["message_service"].list_by_thread_id_user_id(
-      user_id, integration.id, thread_id
-    )
-
-    thread_tasks = await ctx["task_service"].get_by_thread(
-      user_id, integration.id, thread_id
-    )
-
-    extracted = await ctx["agent_service"].run_tasks(
-      user_id=user_id,
-      owner_email=email,
-      task_language=user.task_language,
-      thread_messages=[_stored_to_agent_message(m) for m in stored] or None,
-      new_messages=[_to_agent_message(message)],
-      thread_tasks=thread_tasks,
-    )
-
-    # el agente solo filtra el correo que abriría un hilo (spam, newsletters…): un hilo
-    # que ya tiene tareas guarda todos sus correos, sean tarea o no, como su contexto
-    if not extracted and not thread_tasks:
-      logfire.info("Message {message_id} for {email} carries no task, skipped", message_id=message["id"], email=email)
-      continue
-
-    stored_message = await ctx["message_service"].upsert(
-      Message(
-        user_id=user_id,
-        integration_id=integration.id,
-        provider_id=message["id"],
-        thread_id=thread_id,
-        sender=message["sender"],
-        to=message["to"],
-        cc=message["cc"] or None,
-        subject=message["subject"],
-        body=message["body"],
-        internal_date=message["internal_date"],
+      stored = await ctx["message_service"].list_by_thread_id_user_id(
+        user_id, integration.id, thread_id
       )
-    )
-    logfire.info("Message {message_id} saved for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
 
-    # solo los correos que se guardan llevan sus adjuntos al bucket
-    await ctx["attachment_service"].store_for_message(integration, stored_message, message)
+      thread_tasks = await ctx["task_service"].get_by_thread(
+        user_id, integration.id, thread_id
+      )
 
-    # varias tareas por hilo: el agente dice cuál actualiza (task_id) y cuál es nueva
-    for item in extracted:
-      task_id = existing_task_id(item.task_id, thread_tasks)
-      if item.task_id and not task_id:
-        logfire.warning(
-          "Agent returned unknown task {task_id} for thread {thread_id}, created as new",
-          task_id=item.task_id,
+      extracted = await ctx["agent_service"].run_tasks(
+        user_id=user_id,
+        owner_email=email,
+        task_language=user.task_language,
+        thread_messages=[_stored_to_agent_message(m) for m in stored] or None,
+        new_messages=[_to_agent_message(message)],
+        thread_tasks=thread_tasks,
+      )
+
+      # el agente solo filtra el correo que abriría un hilo (spam, newsletters…): un hilo
+      # que ya tiene tareas guarda todos sus correos, sean tarea o no, como su contexto
+      if not extracted and not thread_tasks:
+        logfire.info("Message {message_id} for {email} carries no task, skipped", message_id=message["id"], email=email)
+        await publish(ctx, user_id, SKIPPED, reason=NO_TASK, **event)
+        continue
+
+      stored_message = await ctx["message_service"].upsert(
+        Message(
+          user_id=user_id,
+          integration_id=integration.id,
+          provider_id=message["id"],
           thread_id=thread_id,
+          sender=message["sender"],
+          to=message["to"],
+          cc=message["cc"] or None,
+          subject=message["subject"],
+          body=message["body"],
+          internal_date=message["internal_date"],
         )
-      task = Task(
-        user_id=user_id,
-        integration_id=integration.id,
-        thread_id=thread_id,
-        title=item.title,
-        status=item.status,
-        due_at=item.due_at,
-        contact_ids=await resolve_contacts(ctx, user_id, email, item.contacts),
       )
-      if task_id:
-        task.id = task_id
-      await ctx["task_service"].upsert(task)
-      logfire.info(
-        "Task {task_id} {action} for thread {thread_id} (user {user_id})",
-        task_id=task.id,
-        action="updated" if task_id else "created",
-        thread_id=thread_id,
-        user_id=user_id,
-      )
+      logfire.info("Message {message_id} saved for {email} (user {user_id})", message_id=message["id"], email=email, user_id=user_id)
+
+      # solo los correos que se guardan llevan sus adjuntos al bucket
+      await ctx["attachment_service"].store_for_message(integration, stored_message, message)
+
+      # varias tareas por hilo: el agente dice cuál actualiza (task_id) y cuál es nueva
+      for item in extracted:
+        task_id = existing_task_id(item.task_id, thread_tasks)
+        if item.task_id and not task_id:
+          logfire.warning(
+            "Agent returned unknown task {task_id} for thread {thread_id}, created as new",
+            task_id=item.task_id,
+            thread_id=thread_id,
+          )
+        task = Task(
+          user_id=user_id,
+          integration_id=integration.id,
+          thread_id=thread_id,
+          title=item.title,
+          status=item.status,
+          due_at=item.due_at,
+          contact_ids=await resolve_contacts(ctx, user_id, email, item.contacts),
+        )
+        if task_id:
+          task.id = task_id
+        await ctx["task_service"].upsert(task)
+        logfire.info(
+          "Task {task_id} {action} for thread {thread_id} (user {user_id})",
+          task_id=task.id,
+          action="updated" if task_id else "created",
+          thread_id=thread_id,
+          user_id=user_id,
+        )
+
+      await publish(ctx, user_id, PROCESSED, tasks=len(extracted), **event)
+    except Exception:
+      # avisa al frontend antes de que el job caiga: si no, el aviso gira hasta caducar
+      await publish(ctx, user_id, ERROR, **event)
+      raise

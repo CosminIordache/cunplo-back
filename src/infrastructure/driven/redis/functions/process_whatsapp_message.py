@@ -3,8 +3,10 @@ import logfire
 from bson import ObjectId
 
 from src.application.use_cases.agent_service import AgentEmailMessage
+from src.infrastructure.driven.redis.functions.events import ERROR, NO_TASK, NOT_CONTACT, PROCESSED, PROCESSING, SKIPPED, publish
 from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact, resolve_contacts
 from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
+from src.domain.integration import Provider
 from src.domain.message import Message
 from src.domain.user import ContactsFilter
 from src.domain.task import Task
@@ -29,6 +31,12 @@ def last_key(integration_id: str, chat: str) -> str:
 def done_key(integration_id: str, chat: str) -> str:
   """internal_date del último mensaje analizado del chat."""
   return f"wa:done:{integration_id}:{chat}"
+
+
+async def _publish_burst(ctx, user_id, integration_id, burst: list[Message], status: str, **data) -> None:
+  """Un evento por mensaje de la ráfaga: el frontend los sigue por message_id, como en correo."""
+  for m in burst:
+    await publish(ctx, user_id, status, integration_id=integration_id, provider=Provider.WHATSAPP, thread_id=m.thread_id, message_id=m.provider_id, subject="", **data)
 
 
 def _stored_to_agent_message(message: Message) -> AgentEmailMessage:
@@ -72,6 +80,7 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
     counterpart = message["to"] if message["sender"] == phone else message["sender"]
     if user and user.only_contacts in (ContactsFilter.ALL, ContactsFilter.WHATSAPP) and not await is_known_contact(ctx, user_oid, counterpart):
       logfire.info("Message {message_id} with a non-contact, skipped", message_id=message["id"])
+      await publish(ctx, user_oid, SKIPPED, reason=NOT_CONTACT, integration_id=integration_id, provider=Provider.WHATSAPP, thread_id=thread_id, message_id=message["id"], subject="")
       return
 
     # se guarda siempre, haya tarea o no: es el contexto del próximo análisis
@@ -108,50 +117,63 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
         logfire.info("Chat {thread_id} already analyzed, skipped", thread_id=thread_id)
         return
 
-      thread_tasks = await ctx["task_service"].get_by_thread(user_oid, integration.id, thread_id)
-      extracted = await ctx["agent_service"].run_tasks(
-        user_id=user_oid,
-        owner_email=phone,
-        task_language=user.task_language,
-        thread_messages=[_stored_to_agent_message(m) for m in previous[-CONTEXT_MESSAGES:]] or None,
-        new_messages=[_stored_to_agent_message(m) for m in burst],
-        thread_tasks=thread_tasks,
-      )
-      await redis.set(done_key(integration_id, thread_id), burst[-1].internal_date, ex=KEY_TTL_SECONDS)
-
-      if not extracted:
-        logfire.info("Burst of {count} messages in chat {thread_id} carries no task", count=len(burst), thread_id=thread_id)
-        # un chat sin tareas no acumula: se queda solo lo que sirve de contexto. Con tareas
-        # se guarda entero y cae con la última tarea (task_service.delete)
-        if not thread_tasks and len(stored) > CONTEXT_MESSAGES:
-          await ctx["message_service"].delete_many(user_oid, [m.id for m in stored[:-CONTEXT_MESSAGES]])
-        return
-
-      # varias tareas por hilo: el agente dice cuál actualiza (task_id) y cuál es nueva
-      for item in extracted:
-        task_id = existing_task_id(item.task_id, thread_tasks)
-        if item.task_id and not task_id:
-          logfire.warning(
-            "Agent returned unknown task {task_id} for thread {thread_id}, created as new",
-            task_id=item.task_id,
-            thread_id=thread_id,
-          )
-        task = Task(
+      await _publish_burst(ctx, user_oid, integration_id, burst, PROCESSING)
+      try:
+        thread_tasks = await ctx["task_service"].get_by_thread(user_oid, integration.id, thread_id)
+        extracted = await ctx["agent_service"].run_tasks(
           user_id=user_oid,
-          integration_id=integration.id,
-          thread_id=thread_id,
-          title=item.title,
-          status=item.status,
-          due_at=item.due_at,
-          contact_ids=await resolve_contacts(ctx, user_oid, phone, item.contacts),
+          owner_email=phone,
+          task_language=user.task_language,
+          thread_messages=[_stored_to_agent_message(m) for m in previous[-CONTEXT_MESSAGES:]] or None,
+          new_messages=[_stored_to_agent_message(m) for m in burst],
+          thread_tasks=thread_tasks,
         )
-        if task_id:
-          task.id = task_id
-        await ctx["task_service"].upsert(task)
-        logfire.info(
-          "Task {task_id} {action} for thread {thread_id} (user {user_id})",
-          task_id=task.id,
-          action="updated" if task_id else "created",
-          thread_id=thread_id,
-          user_id=user_id,
-        )
+        await redis.set(done_key(integration_id, thread_id), burst[-1].internal_date, ex=KEY_TTL_SECONDS)
+
+        if not extracted:
+          logfire.info("Burst of {count} messages in chat {thread_id} carries no task", count=len(burst), thread_id=thread_id)
+          # un chat sin tareas no acumula: se queda solo lo que sirve de contexto. Con tareas
+          # se guarda entero y cae con la última tarea (task_service.delete)
+          if not thread_tasks and len(stored) > CONTEXT_MESSAGES:
+            await ctx["message_service"].delete_many(user_oid, [m.id for m in stored[:-CONTEXT_MESSAGES]])
+          # mismo criterio que en correo: en un chat con tareas el mensaje queda como contexto
+          if thread_tasks:
+            await _publish_burst(ctx, user_oid, integration_id, burst, PROCESSED, tasks=0)
+          else:
+            await _publish_burst(ctx, user_oid, integration_id, burst, SKIPPED, reason=NO_TASK)
+          return
+
+        # varias tareas por hilo: el agente dice cuál actualiza (task_id) y cuál es nueva
+        for item in extracted:
+          task_id = existing_task_id(item.task_id, thread_tasks)
+          if item.task_id and not task_id:
+            logfire.warning(
+              "Agent returned unknown task {task_id} for thread {thread_id}, created as new",
+              task_id=item.task_id,
+              thread_id=thread_id,
+            )
+          task = Task(
+            user_id=user_oid,
+            integration_id=integration.id,
+            thread_id=thread_id,
+            title=item.title,
+            status=item.status,
+            due_at=item.due_at,
+            contact_ids=await resolve_contacts(ctx, user_oid, phone, item.contacts),
+          )
+          if task_id:
+            task.id = task_id
+          await ctx["task_service"].upsert(task)
+          logfire.info(
+            "Task {task_id} {action} for thread {thread_id} (user {user_id})",
+            task_id=task.id,
+            action="updated" if task_id else "created",
+            thread_id=thread_id,
+            user_id=user_id,
+          )
+
+        await _publish_burst(ctx, user_oid, integration_id, burst, PROCESSED, tasks=len(extracted))
+      except Exception:
+        # como en correo: el frontend se entera antes de que el job caiga
+        await _publish_burst(ctx, user_oid, integration_id, burst, ERROR)
+        raise

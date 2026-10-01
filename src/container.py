@@ -160,6 +160,7 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.api.router.usage",
       "src.presentation.api.router.assistant",
       "src.presentation.api.router.transcription",
+      "src.presentation.api.router.events",
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
