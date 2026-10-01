@@ -21,12 +21,13 @@ class ExtractedContact:
 
 @dataclass
 class ExtractedTask:
+  # id de una tarea que ya tiene el hilo cuando el correo la actualiza; null si es nueva.
+  # Primero y sin default: con default el modelo lo omitía y duplicaba la tarea
+  task_id: Optional[str]
   title: str
   status: Status
   contacts: List[ExtractedContact]
   due_at: Optional[datetime] = None
-  # id de una tarea que ya tiene el hilo cuando el correo la actualiza; null si es nueva
-  task_id: Optional[str] = None
 
 @dataclass
 class AgentEmailMessage:
@@ -60,6 +61,9 @@ Devuelves una LISTA con solo las tareas que el correo nuevo crea o modifica:
   respondida cambia de estado; la otra no la devuelvas y sigue pendiente.
 El correo del dueño del buzón te lo dan al principio del prompt. Fíjate en él para saber de
 qué lado estás: si el CORREO NUEVO sale del dueño, es él quien acaba de responder.
+Una respuesta del dueño casi nunca crea una tarea: cambia el estado de la que ya existe
+("vale, te lo envío mañana" pasa esa tarea a WAITING_RESPONSE o le pone fecha). Devuélvela
+con su task_id; solo es nueva si el dueño se compromete a algo que no está en TAREAS DEL HILO.
 
 Campos:
 - title: frase corta con la acción concreta. No es un resumen del correo. Escríbelo siempre
