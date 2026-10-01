@@ -17,6 +17,13 @@ class Role(StrEnum):
   USER = "user"
   ADMIN = "admin"
 
+class ContactsFilter(StrEnum):
+  """En qué canales solo se analizan los mensajes de contactos del usuario."""
+  NONE = "none"
+  ALL = "all"
+  EMAIL = "email"
+  WHATSAPP = "whatsapp"
+
 class CompanySize(StrEnum):
   S1_10 = "1-10"
   S11_50 = "11-50"
@@ -53,8 +60,8 @@ class User:
   # idioma en el que el agente escribe las tareas
   task_language: LanguageAlpha2 = LanguageAlpha2("en")
 
-  # si está activo solo se analizan los correos cuyo remitente ya es contacto del usuario
-  only_contacts: bool = False
+  # en esos canales solo se analizan los mensajes de quien ya es contacto del usuario
+  only_contacts: ContactsFilter = ContactsFilter.NONE
 
   # el usuario ya completó el onboarding
   onboarded: bool = False

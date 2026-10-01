@@ -8,6 +8,7 @@ from src.infrastructure.driven.redis.functions.contacts_filter import is_known_c
 from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
 from src.infrastructure.external_services.outlook import OutlookRateLimited
 from src.domain.message import Message
+from src.domain.user import ContactsFilter
 from src.domain.task import Task
 from src.application.use_cases.task_service import existing_task_id
 
@@ -73,7 +74,7 @@ async def _sync(ctx, integration_id: str, user_id: str) -> None:
       return
 
     user = await ctx["user_service"].get(user_oid)
-    only_contacts = bool(user and user.only_contacts)
+    only_contacts = bool(user and user.only_contacts in (ContactsFilter.ALL, ContactsFilter.EMAIL))
 
     for message in messages:
       thread_id = message["thread_id"]

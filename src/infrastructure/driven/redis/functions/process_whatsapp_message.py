@@ -6,6 +6,7 @@ from src.application.use_cases.agent_service import AgentEmailMessage
 from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact, resolve_contacts
 from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
 from src.domain.message import Message
+from src.domain.user import ContactsFilter
 from src.domain.task import Task
 from src.application.use_cases.task_service import existing_task_id
 
@@ -69,7 +70,7 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
 
     # en un mensaje propio el contacto que cuenta es el destinatario
     counterpart = message["to"] if message["sender"] == phone else message["sender"]
-    if user and user.only_contacts and not await is_known_contact(ctx, user_oid, counterpart):
+    if user and user.only_contacts in (ContactsFilter.ALL, ContactsFilter.WHATSAPP) and not await is_known_contact(ctx, user_oid, counterpart):
       logfire.info("Message {message_id} with a non-contact, skipped", message_id=message["id"])
       return
 
