@@ -65,6 +65,14 @@ class MongoTaskRepository:
     ).sort("created_at", 1)
     return [_to_task(d) async for d in cursor]
 
+  async def get_by_threads(
+    self, user_id: ObjectId, integration_id: ObjectId, thread_ids: list[str]
+  ) -> list[Task]:
+    cursor = self.collection.find(
+      {"user_id": user_id, "integration_id": integration_id, "thread_id": {"$in": thread_ids}}
+    ).sort("created_at", 1)
+    return [_to_task(d) async for d in cursor]
+
   async def get_by_user(
     self, user_id: ObjectId, status: Optional[Status] = None, skip: int = 0, limit: int = 0
   ) -> list[Task]:

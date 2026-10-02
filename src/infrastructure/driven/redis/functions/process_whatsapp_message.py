@@ -2,7 +2,8 @@ import logfire
 
 from bson import ObjectId
 
-from src.application.use_cases.agent_service import AgentAttachment, AgentEmailMessage
+from src.application.use_cases.agent_service import AgentAttachment
+from src.application.use_cases.whatsapp_agent_service import AgentWhatsAppMessage
 from src.infrastructure.driven.redis.functions.events import ERROR, NO_TASK, NOT_CONTACT, PROCESSED, PROCESSING, SKIPPED, publish
 from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact, resolve_contacts
 from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
@@ -80,14 +81,12 @@ async def _publish_burst(ctx, user_id, integration_id, burst: list[Message], sta
     await publish(ctx, user_id, status, integration_id=integration_id, provider=Provider.WHATSAPP, thread_id=m.thread_id, message_id=m.provider_id, subject="", **data)
 
 
-def _stored_to_agent_message(message: Message, attachments: list[AgentAttachment] | None = None) -> AgentEmailMessage:
-  return AgentEmailMessage(
+def _stored_to_agent_message(message: Message, attachments: list[AgentAttachment] | None = None) -> AgentWhatsAppMessage:
+  return AgentWhatsAppMessage(
     thread_id=message.thread_id,
     sender=message.sender,
     to=message.to,
-    subject="",
     body=message.body,
-    channel="whatsapp",
     attachments=attachments or [],
   )
 
@@ -169,9 +168,9 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
         thread_tasks = await ctx["task_service"].get_by_thread(user_oid, integration.id, thread_id)
         # cada mensaje de la ráfaga ya subió su adjunto en su propio job: se lee del bucket
         burst_attachments = await ctx["attachment_service"].for_agent_stored(user_oid, [m.id for m in burst], with_data=True)
-        extracted = await ctx["agent_service"].run_tasks(
+        extracted = await ctx["whatsapp_agent_service"].run_tasks(
           user_id=user_oid,
-          owner_email=phone,
+          owner_phone=phone,
           task_language=user.task_language,
           thread_messages=[_stored_to_agent_message(m) for m in previous[-CONTEXT_MESSAGES:]] or None,
           new_messages=[_stored_to_agent_message(m, burst_attachments.get(m.id)) for m in burst],
@@ -182,7 +181,7 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
         if not extracted:
           logfire.info("Burst of {count} messages in chat {thread_id} carries no task", count=len(burst), thread_id=thread_id)
           # un chat sin tareas no acumula: se queda solo lo que sirve de contexto. Con tareas
-          # se guarda entero y cae con la última tarea (task_service.delete)
+          # se guarda entero
           if not thread_tasks and len(stored) > CONTEXT_MESSAGES:
             await ctx["message_service"].delete_many(user_oid, [m.id for m in stored[:-CONTEXT_MESSAGES]])
           # mismo criterio que en correo: en un chat con tareas el mensaje queda como contexto

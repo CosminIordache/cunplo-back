@@ -18,6 +18,19 @@ class MessageService:
   ) -> list[Message]:
     return await self.repository.list_by_thread_id_user_id(user_id, integration_id, thread_id)
 
+  async def list_context(
+    self,
+    user_id: ObjectId,
+    integration_id: ObjectId,
+    thread_id: str,
+    addresses: list[str],
+    exclude_provider_id: str,
+    limit: int,
+  ) -> list[Message]:
+    return await self.repository.list_context(
+      user_id, integration_id, thread_id, addresses, exclude_provider_id, limit
+    )
+
   async def list_thread_with_attachments(
     self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
   ) -> list[dict]:
@@ -34,14 +47,6 @@ class MessageService:
   async def delete_many(self, user_id: ObjectId, message_ids: list[ObjectId]) -> int:
     await self.attachments.delete_by_messages(user_id, message_ids)
     return await self.repository.delete_many(user_id, message_ids)
-
-  async def delete_by_thread(
-    self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
-  ) -> int:
-    # hay que leerlos antes: los adjuntos viven en otra colección y solo saben del message_id
-    messages = await self.repository.list_by_thread_id_user_id(user_id, integration_id, thread_id)
-    await self.attachments.delete_by_messages(user_id, [m.id for m in messages])
-    return await self.repository.delete_by_thread(user_id, integration_id, thread_id)
 
   async def delete_all_by_user(self, user_id: ObjectId) -> int:
     await self.attachments.delete_all_by_user(user_id)

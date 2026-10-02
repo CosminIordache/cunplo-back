@@ -18,12 +18,13 @@ from src.application.use_cases.subscription_service import SubscriptionService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.usage_service import UsageService
 from src.application.use_cases.user_service import UserService
+from src.application.use_cases.whatsapp_agent_service import WhatsAppAgentService
 from src.application.use_cases.whatsapp_service import WhatsAppService
 from src.infrastructure.driven.mongo.mongo_attachment_repository import MongoAttachmentRepository
 from src.infrastructure.driven.mongo.mongo_contact_repository import MongoContactRepository
 from src.infrastructure.driven.mongo.mongo_graph_repository import MongoGraphRepository
 from src.infrastructure.driven.mongo.mongo_integration_repository import MongoIntegrationRepository
-from src.infrastructure.driven.mongo.mongo_message_repository import MongoMessageRepository
+from src.infrastructure.driven.mongo.mongo_message_repository import MongoMessageRepository, participants
 from src.infrastructure.driven.mongo.mongo_subscription_repository import MongoSubscriptionRepository
 from src.infrastructure.driven.mongo.mongo_task_repository import MongoTaskRepository
 from src.infrastructure.driven.mongo.mongo_usage_repository import MongoUsageRepository
@@ -80,6 +81,17 @@ async def create_indexes(db) -> None:
   )
   # el asistente pide "los últimos correos" sin acotar a un hilo
   await db["messages"].create_index([("user_id", 1), ("internal_date", -1)])
+  # el contexto del agente de correo: lo último hablado con unas personas, en cualquier hilo
+  await db["messages"].create_index(
+    [("user_id", 1), ("integration_id", 1), ("participants", 1), ("internal_date", -1)]
+  )
+  # ponytail: rellena participants en los mensajes de antes del campo (idempotente).
+  # Quitar cuando haya corrido en producción
+  async for doc in db["messages"].find({"participants": {"$exists": False}}, {"sender": 1, "to": 1, "cc": 1}):
+    await db["messages"].update_one(
+      {"_id": doc["_id"]},
+      {"$set": {"participants": participants(doc["sender"], doc.get("to"), doc.get("cc"))}},
+    )
   # las tareas de un hilo (puede haber varias, una por acción). La cuenta entra en la
   # clave porque el thread_id solo es único dentro de ella, igual que el provider_id en messages.
   # Antes era único (un hilo, una tarea): Mongo no cambia opciones de un índice existente,
@@ -233,6 +245,7 @@ class Container(containers.DeclarativeContainer):
   usage_service = providers.Factory(UsageService, repository=usage_repository)
 
   agent_service = providers.Factory(AgentService, usage_service=usage_service)
+  whatsapp_agent_service = providers.Factory(WhatsAppAgentService, usage_service=usage_service)
   # Singleton: montar el Agent (esquemas de tools, cliente de OpenAI) costaba ~40% de CPU por pregunta
   assistant_service = providers.Singleton(AssistantService, db=db, usage_service=usage_service)
   transcription_service = providers.Factory(TranscriptionService, usage_service=usage_service)

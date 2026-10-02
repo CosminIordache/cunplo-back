@@ -7,9 +7,15 @@ from src.application.ports.task_repository import TaskRepository
 from src.application.use_cases.message_service import MessageService
 
 
+def existing_task(task_id: Optional[str], tasks: list[Task]) -> Optional[Task]:
+  """El id que devuelve el agente solo vale si es de una de las tareas que se le dieron;
+  si no, la tarea es nueva."""
+  return next((t for t in tasks if str(t.id) == task_id), None)
+
+
 def existing_task_id(task_id: Optional[str], thread_tasks: list[Task]) -> Optional[ObjectId]:
-  """El id que devuelve el agente solo vale si es de una tarea del hilo; si no, la tarea es nueva."""
-  return next((t.id for t in thread_tasks if str(t.id) == task_id), None)
+  task = existing_task(task_id, thread_tasks)
+  return task.id if task else None
 
 
 class TaskService:
@@ -28,6 +34,11 @@ class TaskService:
   ) -> list[Task]:
     return await self.repository.get_by_thread(user_id, integration_id, thread_id)
 
+  async def get_by_threads(
+    self, user_id: ObjectId, integration_id: ObjectId, thread_ids: list[str]
+  ) -> list[Task]:
+    return await self.repository.get_by_threads(user_id, integration_id, thread_ids)
+
   async def get_by_user(
     self, user_id: ObjectId, status: Optional[Status] = None, skip: int = 0, limit: int = 0
   ) -> list[Task]:
@@ -37,32 +48,8 @@ class TaskService:
     return await self.repository.update(task_id, user_id, changes)
 
   async def delete(self, task_id: ObjectId, user_id: ObjectId) -> bool:
-    """La última tarea del hilo se lleva sus correos: sin tarea no hay por qué guardarlos.
-    Si quedan otras, los correos se quedan: son su contexto."""
-    task = await self.repository.get(task_id, user_id)
-    if not task:
-      return False
-
-    siblings = await self.repository.get_by_thread(user_id, task.integration_id, task.thread_id)
-    if any(t.id != task.id for t in siblings):
-      logfire.info(
-        "Task {task_id} deleted, thread {thread_id} keeps its messages for {remaining} tasks",
-        task_id=task_id,
-        thread_id=task.thread_id,
-        remaining=len(siblings) - 1,
-      )
-      return await self.repository.delete(task_id, user_id)
-
-    # la tarea ya sabe de qué buzón sale: solo caen los correos de esa cuenta
-    deleted = await self.messages.delete_by_thread(
-      user_id, task.integration_id, task.thread_id
-    )
-    logfire.info(
-      "Task {task_id} deleted with {deleted} messages of thread {thread_id}",
-      task_id=task_id,
-      deleted=deleted,
-      thread_id=task.thread_id,
-    )
+    """Solo la tarea: los correos se quedan, son el contexto de lo que se habla con esas
+    personas aunque ya no tengan tarea."""
     return await self.repository.delete(task_id, user_id)
 
   async def delete_all_by_user(self, user_id: ObjectId) -> int:
