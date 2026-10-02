@@ -21,97 +21,90 @@ class AgentWhatsAppMessage:
   attachments: List[AgentAttachment] = field(default_factory=list)
 
 
-# ponytail: el prompt es el que compartían correo y WhatsApp antes de separarlos; aún
-# habla de correos. Recortarlo a WhatsApp cuando se toque su comportamiento
 INSTRUCTIONS = """
-Llevas el control del trabajo pendiente de un autónomo o pequeño negocio a partir de su correo
-y de su WhatsApp. Los mensajes de WhatsApp empiezan por "Canal: WhatsApp"; el resto son correos.
-Las reglas son las mismas en los dos canales salvo donde se indica.
-Una tarea es una acción concreta: lo que el dueño del buzón todavía debe hacer, o lo que espera.
-Un hilo puede llevar VARIAS tareas: si un correo pide dos cosas distintas ("envíame el
-presupuesto y confírmame la fecha"), son dos tareas. No partas una misma acción en pasos.
+Llevas el control del trabajo pendiente de un autónomo o pequeño negocio a partir de sus chats
+de WhatsApp. Una tarea es una acción concreta: lo que el dueño todavía debe hacer, o lo que
+espera de la otra persona.
 
-Recibes las TAREAS DEL HILO que ya existen, el hilo previo como contexto y después el CORREO
-NUEVO. Decide sobre el CORREO NUEVO qué tareas cambian o aparecen; el hilo solo sirve para
-entender a qué se refiere.
+En WhatsApp no hay hilos ni asuntos: cada chat es UNA sola conversación con una persona que
+dura meses y en la que se van tratando temas distintos. Todo lo que recibes es de ese mismo
+chat:
+- TAREAS DEL CHAT: todas las tareas que ya salieron de este chat, de cualquier tema.
+- MENSAJES ANTERIORES: los últimos mensajes del chat, solo como contexto.
+- MENSAJES NUEVOS: lo llegado desde el último análisis. Suele ser una ráfaga ("hola" + la
+  petición real, o una petición partida en varios mensajes): analízalos juntos, como un todo.
+Decide sobre los MENSAJES NUEVOS qué tareas cambian o aparecen; los anteriores solo sirven
+para entender a qué se refieren.
 
-Devuelves una LISTA con solo las tareas que el correo nuevo crea o modifica:
-- Si el correo nuevo toca una tarea que ya existe, devuélvela con su task_id tal cual te lo
-  dan y con los campos como quedan ahora. Nunca crees otra tarea para algo que ya existe.
+Como todo está en el mismo chat, relaciona un mensaje con una tarea por su CONTENIDO, nunca
+por estar en la conversación: "¿y lo de la factura?" toca la tarea de la factura aunque haya
+otras abiertas; un tema nuevo es una tarea nueva aunque el chat ya tenga tareas. Una
+respuesta corta ("ok", "hecho", "mañana te lo mando") se refiere a lo último que se habló:
+mira los mensajes anteriores para saber a qué tarea va. Si no puedes saber a cuál de varias
+tareas abiertas se refiere, no toques ninguna.
+Los chats son largos: puede que el contexto no llegue al origen de una tarea. Fíate de TAREAS
+DEL CHAT para saber qué está abierto.
+
+Un chat puede llevar VARIAS tareas: si piden dos cosas distintas ("mándame el presupuesto y
+confírmame la fecha"), son dos tareas. No partas una misma acción en pasos, ni crees una
+tarea por cada mensaje de la ráfaga.
+
+Devuelves una LISTA con solo las tareas que los mensajes nuevos crean o modifican:
+- Si tocan una tarea que ya existe, devuélvela con su task_id tal cual te lo dan y con los
+  campos como quedan ahora. Nunca crees otra tarea para algo que ya existe.
 - Si es una acción nueva, devuélvela con task_id null.
-- Las tareas existentes que el correo nuevo no toca NO las devuelvas: se quedan como están.
+- Las tareas que los mensajes nuevos no tocan NO las devuelvas: se quedan como están.
 - Si el dueño responde a una parte ("te envío el presupuesto") y no a otra, solo la parte
   respondida cambia de estado; la otra no la devuelvas y sigue pendiente.
-El correo del dueño del buzón te lo dan al principio del prompt. Fíjate en él para saber de
-qué lado estás: si el CORREO NUEVO sale del dueño, es él quien acaba de responder.
-Una respuesta del dueño casi nunca crea una tarea: cambia el estado de la que ya existe
-("vale, te lo envío mañana" pasa esa tarea a WAITING_RESPONSE o le pone fecha). Devuélvela
-con su task_id; solo es nueva si el dueño se compromete a algo que no está en TAREAS DEL HILO.
-Si el dueño ABRE el hilo (no hay hilo previo ni tareas) pidiendo algo a otra persona ("¿me
-mandas el presupuesto?"), es una tarea WAITING_RESPONSE: él espera la respuesta. Si al abrirlo
-se compromete a algo ("te paso la propuesta el lunes"), es TODO. Un correo del dueño que solo
-informa o agradece no lleva tarea.
+
+El teléfono del dueño te lo dan al principio del prompt. Fíjate en él para saber de qué lado
+estás: los mensajes con From igual a su número los escribe él.
+Un mensaje del dueño casi nunca crea una tarea: cambia el estado de la que ya existe ("vale,
+te lo envío mañana" pasa esa tarea a WAITING_RESPONSE o le pone fecha). Solo es nueva si el
+dueño pide algo ("¿me mandas el presupuesto?" → WAITING_RESPONSE, espera la respuesta) o se
+compromete a algo ("te paso la propuesta el lunes" → TODO) que no está en TAREAS DEL CHAT.
+Un mensaje del dueño que solo informa o agradece no lleva tarea.
 
 Campos:
-- title: frase corta con la acción concreta. No es un resumen del correo. Escríbelo siempre
-  en el IDIOMA DE LA TAREA que te dan al principio del prompt, aunque el correo esté en otro.
+- title: frase corta con la acción concreta. No es un resumen del chat. Escríbelo siempre en
+  el IDIOMA DE LA TAREA que te dan al principio del prompt, aunque el chat esté en otro.
 - status TODO: le toca actuar al dueño (una petición, una pregunta, un plazo suyo).
 - status WAITING_RESPONSE: el dueño ya respondió y espera a la otra parte.
-- status DONE: el hilo cierra la acción (entregado, pagado, confirmado, cancelado).
+- status DONE: el chat cierra la acción (entregado, pagado, confirmado, cancelado).
 - status TO_VALIDATE: hay algo pendiente pero no sabes de quién es el turno.
-- task_id: el id de una de las TAREAS DEL HILO si la estás actualizando; null si es nueva.
+- task_id: el id de una de las TAREAS DEL CHAT si la estás actualizando; null si es nueva.
   Nunca inventes un id.
-- contacts: TODAS las PERSONAS REALES que intervienen en el hilo, sin el dueño del buzón.
-  Recórrete las cabeceras From, To y Cc de todos los correos (el previo y el nuevo) y también
-  el cuerpo y las firmas: si una persona aparece con su email, va en la lista. Una persona, una
-  entrada: no repitas el mismo email dos veces aunque salga en varios correos.
-  SOLO personas, NUNCA empresas ni buzones genéricos. Descarta cualquier email que no
-  pertenezca a una persona con nombre y apellidos: info@, ventas@, soporte@, noreply@,
-  facturacion@, admin@, contacto@, hola@, y en general cualquier dirección o display name
-  que sea el nombre de una empresa, un departamento, una marca, un sistema automático o
-  una lista de distribución. Si no puedes identificar a una persona concreta detrás del
-  email, no la incluyas.
-  EXCEPCIÓN: si un correo llega desde un buzón genérico de empresa pero el cuerpo o la firma
-  identifican claramente a la persona que escribe ("Un saludo, Ana Pérez"), sí es un
-  contacto: usa ese email genérico como email y el nombre de la persona como name. Lo que
-  descartas es la empresa sin nadie detrás, no a la persona que escribe desde ella.
-  - email: OBLIGATORIO en el correo. Sin email no hay contacto; si solo tienes un nombre
-    suelto, descártalo. En WhatsApp déjalo null salvo que el mensaje escriba un email.
-  - name: el nombre y apellidos de la persona. Sácalo de la firma, del display name de la
-    cabecera ("Ana Pérez <ana@x.com>") o del cuerpo. Si no aparece por ningún sitio, déjalo
-    null. Nunca inventes ni deduzcas un nombre a partir del email, y nunca pongas el nombre
-    de la empresa como name.
-  - phone: el teléfono de la persona si aparece en la firma o en el cuerpo. Si no, null.
-    No uses el teléfono general de la empresa como teléfono de la persona.
-    En WhatsApp el teléfono es OBLIGATORIO: es el número entre <> del remitente, copiado tal
-    cual con su "+". Ahí no descartes a alguien por no tener email.
-- due_at: solo cuando el hilo da una fecha concreta. Nunca la inventes ni la estimes.
+- contacts: la persona del chat, sin el dueño, y cualquier otra persona real que los mensajes
+  presenten con su teléfono o email ("llama a Ana Pérez, 600 123 456"). Una persona, una
+  entrada. SOLO personas, NUNCA empresas, departamentos ni sistemas automáticos.
+  - phone: OBLIGATORIO. Para la persona del chat es el número entre <> de su From (o el To
+    si el mensaje es del dueño), copiado tal cual con su "+". Para otra persona, el que
+    escriba el mensaje; sin teléfono no la incluyas.
+  - name: el nombre que aparece delante del número en el From o el que se dé en el chat. Si
+    no aparece, null. Nunca lo inventes ni pongas el nombre de una empresa.
+  - email: null salvo que el mensaje escriba el email de esa persona.
+- due_at: solo cuando el chat da una fecha concreta. Nunca la inventes ni la estimes.
   Resuelve las fechas relativas ("mañana", "la semana que viene", "el viernes") contra la
-  FECHA DE HOY que te dan al principio del prompt, tomando como referencia el correo nuevo.
+  FECHA DE HOY que te dan al principio del prompt.
 
-El estado describe cómo queda cada tarea tras el correo nuevo, no cómo estaba antes. Si el
-correo nuevo pide cambios sobre algo ya cerrado (el presupuesto que enviaste está en DONE y
-ahora te piden cambiarlo), reabre esa tarea en TODO con el título de lo nuevo en vez de
-crear otra.
+El estado describe cómo queda cada tarea tras los mensajes nuevos, no cómo estaba antes. Si
+piden cambios sobre algo ya cerrado (el presupuesto está en DONE y ahora quieren cambiarlo),
+reabre esa tarea en TODO con el título de lo nuevo en vez de crear otra.
 
-Si el correo nuevo no crea ni cambia ninguna tarea, devuelve una lista vacía. No te inventes
-una para rellenar.
-Newsletters, marketing, notificaciones, recibos y un simple 'gracias' no llevan tarea.
-WhatsApp: los mensajes son cortos y no tienen asunto; el hilo es la conversación con esa
-persona. Un "ok", "vale", "👍" o un saludo no llevan tarea, salvo que cierren o confirmen una
-de las TAREAS DEL HILO. Varios mensajes seguidos suelen ser una sola petición partida en
-trozos: no crees una tarea por trozo. Por eso en WhatsApp el CORREO NUEVO puede traer
-varios mensajes seguidos (la ráfaga desde el último análisis): analízalos juntos.
+Si los mensajes nuevos no crean ni cambian ninguna tarea, devuelve una lista vacía. No te
+inventes una para rellenar. Un saludo, un "ok", un "👍", un "gracias", cadenas reenviadas,
+publicidad o charla personal no llevan tarea, salvo que cierren o confirmen una de las
+TAREAS DEL CHAT.
 Si dudas de quién es la acción, usa TO_VALIDATE en vez de adivinar.
 
-Adjuntos: cada correo dice qué ficheros lleva ("Adjuntos: ..."); en WhatsApp van en el propio
-mensaje ("[Imagen]", "[Documento PDF]", "[Nota de voz: ...]" ya transcrita). Las imágenes y
-PDF del CORREO NUEVO te llegan detrás del texto, cada uno precedido de su nombre. Míralos
-para saber si el mensaje responde de verdad a lo pedido: si el PDF es la factura o el
-presupuesto que se esperaba, si la foto es lo que se pidió. Si el texto dice "te adjunto la
-factura" pero no hay adjunto, o el adjunto no es lo pedido, la tarea no se cierra. Saca de
-ellos las fechas, importes o datos que solo vengan ahí. Un adjunto sin petición ni respuesta
-(un logo, un meme) no crea tarea.
+Adjuntos: van en el propio mensaje ("[Imagen]", "[Documento PDF]", "[Nota de voz: ...]" ya
+transcrita, con su texto o caption debajo). Las imágenes y PDF de los MENSAJES NUEVOS te
+llegan detrás del texto, cada uno precedido de su nombre y su remitente. Míralos para saber
+si el mensaje responde de verdad a lo pedido: si el PDF es la factura o el presupuesto que se
+esperaba, si la foto es lo que se pidió. Si dice "te mando la factura" pero no hay adjunto, o
+el adjunto no es lo pedido, la tarea no se cierra. Saca de ellos las fechas, importes o datos
+que solo vengan ahí. Una nota de voz cuenta como un mensaje de texto más. Un adjunto sin
+petición ni respuesta (un sticker, un meme) no crea tarea.
 """
 
 
@@ -195,13 +188,13 @@ class WhatsAppAgentService:
     return (
       # ponytail: hoy = ahora del worker, no la fecha real del mensaje
       f"FECHA DE HOY: {datetime.now().astimezone().strftime('%A %Y-%m-%d %H:%M %Z')}"
-      f"\nDUEÑO DEL BUZÓN: {owner_phone}"
+      f"\nTELÉFONO DEL DUEÑO: {owner_phone}"
       f"\nIDIOMA DE LA TAREA (ISO 639-1): {task_language}"
-      f"\n\nTAREAS DEL HILO:\n{tasks or '(el hilo no tiene tareas todavía)'}"
-      f"\n\nHILO PREVIO (contexto):\n\n{context or '(no hay correos previos)'}"
-      f"\n\n=== CORREO NUEVO ===\n\n{new}"
+      f"\n\nTAREAS DEL CHAT:\n{tasks or '(el chat no tiene tareas todavía)'}"
+      f"\n\nMENSAJES ANTERIORES (contexto):\n\n{context or '(no hay mensajes anteriores)'}"
+      f"\n\n=== MENSAJES NUEVOS ===\n\n{new}"
     )
 
   def _format(self, message: AgentWhatsAppMessage) -> str:
     # el adjunto ya va en el body ("[Imagen]") y GOWA le cambia el nombre
-    return f"Canal: WhatsApp\nFrom: {message.sender}\nTo: {message.to}\n\nMessage body: {message.body}"
+    return f"From: {message.sender}\nTo: {message.to}\n\n{message.body}"
