@@ -203,7 +203,7 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
           task = Task(
             user_id=user_oid,
             integration_id=integration.id,
-            thread_id=thread_id,
+            thread_ids=[thread_id],
             title=item.title,
             status=item.status,
             due_at=item.due_at,

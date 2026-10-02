@@ -18,7 +18,7 @@ class TaskOut(BaseModel):
   id: Annotated[str, BeforeValidator(str)]  # ObjectId -> str
   user_id: Annotated[str, BeforeValidator(str)]
   integration_id: Annotated[str, BeforeValidator(str)]
-  thread_id: str
+  thread_ids: List[str]
   title: str
   status: Status
   contact_ids: List[Annotated[str, BeforeValidator(str)]] = []

@@ -92,15 +92,18 @@ async def create_indexes(db) -> None:
       {"_id": doc["_id"]},
       {"$set": {"participants": participants(doc["sender"], doc.get("to"), doc.get("cc"))}},
     )
-  # las tareas de un hilo (puede haber varias, una por acción). La cuenta entra en la
-  # clave porque el thread_id solo es único dentro de ella, igual que el provider_id en messages.
-  # Antes era único (un hilo, una tarea): Mongo no cambia opciones de un índice existente,
-  # así que el viejo se borra antes de crear este
-  thread_key = [("user_id", 1), ("integration_id", 1), ("thread_id", 1)]
+  # las tareas de un hilo (puede haber varias, una por acción, y una tarea puede estar en
+  # varios hilos: multikey). La cuenta entra en la clave porque el thread_id solo es único
+  # dentro de ella, igual que el provider_id en messages.
+  # Antes cada tarea tenía un solo thread_id: se pasa a lista y el índice viejo se borra
+  await db["tasks"].update_many(
+    {"thread_ids": {"$exists": False}},
+    [{"$set": {"thread_ids": ["$thread_id"]}}, {"$unset": "thread_id"}],
+  )
   indexes = await db["tasks"].index_information()
-  if indexes.get("user_id_1_integration_id_1_thread_id_1", {}).get("unique"):
+  if "user_id_1_integration_id_1_thread_id_1" in indexes:
     await db["tasks"].drop_index("user_id_1_integration_id_1_thread_id_1")
-  await db["tasks"].create_index(thread_key)
+  await db["tasks"].create_index([("user_id", 1), ("integration_id", 1), ("thread_ids", 1)])
   # las tres columnas de la app: tareas del usuario por estado
   await db["tasks"].create_index([("user_id", 1), ("status", 1), ("due_at", 1)])
   # el asistente responde "qué he hablado con X" por las tareas en las que X participa

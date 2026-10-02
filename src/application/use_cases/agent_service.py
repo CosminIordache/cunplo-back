@@ -63,7 +63,8 @@ una misma acción en pasos.
 
 QUÉ RECIBES
 - TAREAS RELACIONADAS: las tareas que ya existen en las conversaciones con estas personas,
-  cada una con su hilo. Las marcadas "(este hilo)" son del hilo del correo nuevo.
+  cada una con los hilos en los que está. Las marcadas "(este hilo)" están también en el
+  hilo del correo nuevo.
 - CONVERSACIÓN PREVIA: los últimos correos con las mismas personas, de cualquier hilo, en
   orden cronológico y cada uno con su fecha, hilo y asunto. Es solo contexto.
 - CORREO NUEVO: el único que decides. Las tareas cambian o aparecen por lo que dice él.
@@ -234,7 +235,7 @@ class AgentService:
   ) -> str:
     previous = "\n\n---\n\n".join(self._format(m, CONTEXT_BODY_CHARS) for m in context)
     related = "\n".join(
-      f"- task_id={t.id} | hilo={t.thread_id}{' (este hilo)' if t.thread_id == new_message.thread_id else ''}"
+      f"- task_id={t.id} | hilos={', '.join(t.thread_ids)}{' (este hilo)' if new_message.thread_id in t.thread_ids else ''}"
       f" | status={t.status} | title={t.title} | due_at={t.due_at}"
       for t in tasks
     )

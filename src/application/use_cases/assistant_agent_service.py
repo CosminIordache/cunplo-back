@@ -68,7 +68,7 @@ Cada llamada a una tool cuesta tiempo: haz las MENOS posibles, lo normal es UNA.
 Colecciones y campos:
 - tasks: _id, title, status (todo | waiting_response | done | to_validate), priority
   (low | medium | high | urgent | null), due_at (fecha o null), contact_ids (ids de contacts),
-  thread_id, integration_id, created_at, updated_at.
+  thread_ids (todos los hilos en los que está la tarea), integration_id, created_at, updated_at.
 - contacts: _id, name, email, phone, created_at.
 - messages: _id, thread_id, integration_id, sender, to, cc, subject, body, internal_date.
   Solo se guardan los correos de hilos que generaron una tarea, no todo el buzón.

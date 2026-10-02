@@ -170,7 +170,7 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
       await ctx["attachment_service"].store_for_message(integration, stored_message, message)
 
       # el agente dice cuál actualiza (task_id) y cuál es nueva. Una tarea de otro hilo
-      # conserva el suyo: es donde nació, y el upsert filtra por él
+      # suma este a sus hilos: el upsert los acumula
       for item in extracted:
         existing = existing_task(item.task_id, related_tasks)
         if item.task_id and not existing:
@@ -182,7 +182,7 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
         task = Task(
           user_id=user_id,
           integration_id=integration.id,
-          thread_id=existing.thread_id if existing else thread_id,
+          thread_ids=[thread_id],
           title=item.title,
           status=item.status,
           due_at=item.due_at,
@@ -195,7 +195,7 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
           "Task {task_id} {action} for thread {thread_id} (user {user_id})",
           task_id=task.id,
           action="updated" if existing else "created",
-          thread_id=task.thread_id,
+          thread_id=thread_id,
           user_id=user_id,
         )
 

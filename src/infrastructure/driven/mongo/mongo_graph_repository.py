@@ -38,8 +38,9 @@ class MongoGraphRepository:
       }},
       {"$lookup": {
         "from": "messages",
-        # el thread_id solo es único dentro de la cuenta: la pareja es la clave
-        "let": {"integration_id": "$integration_id", "thread_id": "$thread_id"},
+        # el thread_id solo es único dentro de la cuenta: la pareja es la clave.
+        # Una tarea trae los mensajes de todos sus hilos
+        "let": {"integration_id": "$integration_id", "thread_ids": "$thread_ids"},
         "as": "messages",
         "pipeline": [
           # user_id primero: es el prefijo del índice de messages, sin él Mongo
@@ -47,7 +48,7 @@ class MongoGraphRepository:
           {"$match": {"$expr": {"$and": [
             {"$eq": ["$user_id", user_id]},
             {"$eq": ["$integration_id", "$$integration_id"]},
-            {"$eq": ["$thread_id", "$$thread_id"]},
+            {"$in": ["$thread_id", "$$thread_ids"]},
           ]}}},
           {"$sort": {"internal_date": 1}},  # el orden real dentro del hilo
           # el cuerpo del correo no viaja: en el grafo solo se pinta la cabecera
@@ -97,7 +98,7 @@ class MongoGraphRepository:
           "priority": "$priority",
           "due_at": "$due_at",
           "integration_id": {"$toString": "$integration_id"},
-          "thread_id": "$thread_id",
+          "thread_ids": "$thread_ids",
         },
         "contacts": {"$map": {"input": "$contacts", "as": "c", "in": {
           "id": {"$toString": "$$c._id"},

@@ -143,7 +143,11 @@ async def _threads(db, user_id: ObjectId, keys: list[dict], with_body: bool) -> 
     return []
   query = {"user_id": user_id, "$or": keys}
   # tres consultas, todas por índice; una sola vuelta del modelo
-  tasks = await db["tasks"].find(query, HIDDEN["tasks"]).to_list(length=MAX_LIMIT)
+  task_query = {
+    "user_id": user_id,
+    "$or": [{"integration_id": k["integration_id"], "thread_ids": k["thread_id"]} for k in keys],
+  }
+  tasks = await db["tasks"].find(task_query, HIDDEN["tasks"]).to_list(length=MAX_LIMIT)
   projection = dict(HIDDEN["messages"])
   if with_body:
     projection.pop("body")
@@ -155,10 +159,11 @@ async def _threads(db, user_id: ObjectId, keys: list[dict], with_body: bool) -> 
     {"user_id": user_id, "_id": {"$in": list(contact_ids)}}, HIDDEN["contacts"]
   ).to_list(length=MAX_LIMIT)
   by_id = {c["_id"]: c for c in contacts}
-  # un hilo puede llevar varias tareas, una por acción
+  # un hilo puede llevar varias tareas, una por acción, y una tarea salir en varios hilos
   tasks_by_key: dict = {}
   for t in tasks:
-    tasks_by_key.setdefault((t["integration_id"], t["thread_id"]), []).append(t)
+    for thread in t["thread_ids"]:
+      tasks_by_key.setdefault((t["integration_id"], thread), []).append(t)
   result = []
   for key in keys:
     pair = (key["integration_id"], key["thread_id"])
@@ -187,7 +192,7 @@ async def thread_context(
 ) -> list[dict]:
   """Todo lo de uno o varios hilos EN UNA sola llamada: sus tareas, sus correos y sus contactos.
 
-  Úsala en cuanto tengas thread_id e integration_id (p.ej. tras un find en tasks) en vez
+  Úsala en cuanto tengas thread_ids e integration_id (p.ej. tras un find en tasks) en vez
   de encadenar finds. Devuelve una entrada por hilo con
   {"tasks": [...], "messages": [...ordenados por fecha...], "contacts": [...]}.
   Un hilo puede tener varias tareas, una por acción.
@@ -230,9 +235,10 @@ async def conversations_with(
   if contact:
     # relación ya resuelta por el worker: igualdad por índice, sin buscar texto
     tasks = await db["tasks"].find(
-      {"user_id": user_id, "contact_ids": contact["_id"]}, {"integration_id": 1, "thread_id": 1}
+      {"user_id": user_id, "contact_ids": contact["_id"]}, {"integration_id": 1, "thread_ids": 1}
     ).to_list(length=MAX_LIMIT)
-    keys = [{"integration_id": t["integration_id"], "thread_id": t["thread_id"]} for t in tasks]
+    keys = list({(t["integration_id"], th): None for t in tasks for th in t["thread_ids"]})
+    keys = [{"integration_id": i, "thread_id": th} for i, th in keys]
   if not keys:
     # sin contacto, o contacto sin tareas enlazadas: cabeceras crudas de los correos
     needle = contact["email"] if contact else person

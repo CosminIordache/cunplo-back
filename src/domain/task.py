@@ -24,8 +24,8 @@ class Priority(StrEnum):
 class Task:
 
   user_id: ObjectId
-  integration_id: ObjectId  # de qué buzón sale: el thread_id solo es único dentro de la cuenta
-  thread_id: str
+  integration_id: ObjectId  # de qué buzón sale: un thread_id solo es único dentro de la cuenta
+  thread_ids: List[str]  # todos los hilos que la tocaron: una tarea puede seguir en otro hilo
   title: str
   status: Status
  

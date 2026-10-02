@@ -24,8 +24,9 @@ class MongoTaskRepository:
     self.collection = db["tasks"]
 
   async def upsert(self, task: Task) -> Task:
-    """Por id: el job decide si el correo actualiza una tarea del hilo o crea otra.
-    Usuario, cuenta e hilo van en el filtro: un id ajeno al hilo no toca nada, inserta."""
+    """Por id: el job decide si el correo actualiza una tarea o crea otra. Usuario y
+    cuenta van en el filtro: un id ajeno no toca nada, inserta. Los hilos se acumulan:
+    una tarea actualizada desde otro hilo pasa a estar también en él."""
     task.updated_at = datetime.now(UTC)
     document = _to_document(task)
     document.pop("_id")
@@ -36,16 +37,16 @@ class MongoTaskRepository:
     # Los contactos se acumulan en vez de sustituirse: el agente solo mira el correo
     # nuevo, y los de correos anteriores del hilo ya no vuelven a salir.
     contact_ids = document.pop("contact_ids")
+    thread_ids = document.pop("thread_ids")
     doc = await self.collection.find_one_and_update(
       {
         "_id": task.id,
         "user_id": task.user_id,
         "integration_id": task.integration_id,
-        "thread_id": task.thread_id,
       },
       {
         "$set": document,
-        "$addToSet": {"contact_ids": {"$each": contact_ids}},
+        "$addToSet": {"contact_ids": {"$each": contact_ids}, "thread_ids": {"$each": thread_ids}},
         "$setOnInsert": {"created_at": task.created_at},
       },
       upsert=True,
@@ -61,7 +62,7 @@ class MongoTaskRepository:
     self, user_id: ObjectId, integration_id: ObjectId, thread_id: str
   ) -> list[Task]:
     cursor = self.collection.find(
-      {"user_id": user_id, "integration_id": integration_id, "thread_id": thread_id}
+      {"user_id": user_id, "integration_id": integration_id, "thread_ids": thread_id}
     ).sort("created_at", 1)
     return [_to_task(d) async for d in cursor]
 
@@ -69,7 +70,7 @@ class MongoTaskRepository:
     self, user_id: ObjectId, integration_id: ObjectId, thread_ids: list[str]
   ) -> list[Task]:
     cursor = self.collection.find(
-      {"user_id": user_id, "integration_id": integration_id, "thread_id": {"$in": thread_ids}}
+      {"user_id": user_id, "integration_id": integration_id, "thread_ids": {"$in": thread_ids}}
     ).sort("created_at", 1)
     return [_to_task(d) async for d in cursor]
 
