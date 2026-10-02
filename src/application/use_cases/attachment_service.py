@@ -11,7 +11,7 @@ from src.application.ports.storage import Storage
 from src.application.use_cases.integration_service import ReauthRequired
 from src.domain.integration import Integration, Provider
 from src.application.use_cases.integration_service import IntegrationService
-from src.infrastructure.external_services import gmail, gowa, outlook
+from src.infrastructure.external_services import gmail, gowa
 
 
 # lo que el modelo puede leer; el resto le llega solo por nombre
@@ -46,27 +46,20 @@ class AttachmentService:
   async def _bytes(
     self, integration: Integration, token: str, provider_id: str, attachment: dict
   ) -> bytes:
-    """Graph ya manda los bytes en el listado; Gmail obliga a una llamada por fichero;
-    WhatsApp lo tiene ya descargado en GOWA. Si for_agent ya los bajó, se reutilizan."""
+    """Gmail obliga a una llamada por fichero; WhatsApp lo tiene ya descargado en GOWA.
+    Si for_agent ya los bajó, se reutilizan."""
     if data := attachment.get("data"):
       return data
     if integration.provider == Provider.WHATSAPP:
       return await gowa.media(attachment["path"])
-    if content := attachment.get("content_bytes"):
-      return base64.b64decode(content)
-    if integration.provider == Provider.MICROSOFT:
-      return await outlook.get_attachment(token, provider_id, attachment["attachment_id"])
     return await gmail.get_attachment(token, provider_id, attachment["attachment_id"])
 
   async def _resolve(
     self, integration: Integration, provider_id: str, raw_message: dict
   ) -> tuple[str, list[dict]]:
-    """El token y la lista de adjuntos del mensaje. El listado de Graph se deja en
-    raw_message: la segunda llamada (guardar tras analizar) ya no lo repite."""
+    """El token y la lista de adjuntos del mensaje (Gmail y GOWA los traen en el propio mensaje)."""
     attachments = raw_message.get("attachments") or []
-    # Gmail los trae en el propio mensaje; el delta de Graph solo dice si los hay
-    needs_listing = not attachments and raw_message.get("has_attachments")
-    if not attachments and not needs_listing:
+    if not attachments:
       return "", []
 
     token = ""  # GOWA no usa tokens: su Basic Auth la pone gowa.py
@@ -80,18 +73,6 @@ class AttachmentService:
           provider_id=provider_id,
         )
         return "", []
-
-    if needs_listing:
-      try:
-        attachments = await outlook.list_attachments(token, provider_id)
-      except outlook.OutlookError as error:
-        logfire.warning(
-          "Could not list attachments of {provider_id}: {error}",
-          provider_id=provider_id,
-          error=error,
-        )
-        return "", []
-      raw_message["attachments"] = attachments
     return token, attachments
 
   async def for_agent(
@@ -106,7 +87,7 @@ class AttachmentService:
       if _readable(attachment["mime_type"], attachment.get("size") or 0):
         try:
           attachment["data"] = await self._bytes(integration, token, provider_id, attachment)
-        except (gmail.GmailRateLimited, outlook.OutlookRateLimited):
+        except gmail.GmailRateLimited:
           raise  # el job lo convierte en Retry: el marcador no avanzó
         except Exception as error:
           # sin el contenido el agente aún tiene el nombre: no tumba el análisis

@@ -12,7 +12,6 @@ class InvalidIntegration(ValueError):
 
 class Provider(StrEnum):
   GOOGLE = "google"
-  MICROSOFT = "microsoft"
   WHATSAPP = "whatsapp"
 
 
@@ -24,13 +23,12 @@ class Integration:
   account_id: str  # 'sub' del proveedor (en WhatsApp, el device_id de GOWA): estable aunque cambie el email
   scopes: list[str]
   refresh_token: Optional[str]  # cifrado en el repositorio, nunca en claro en Mongo
-  email: Optional[str] = None  # solo correo (Google, Microsoft)
+  email: Optional[str] = None  # solo correo (Google)
   phone: Optional[str] = None  # solo WhatsApp, en E.164
   access_token: Optional[str] = None
   expires_at: Optional[datetime] = None
   history_id: Optional[str] = None  # versión del buzón hasta la que hemos procesado
-  watch_expires_at: Optional[datetime] = None  # Gmail caduca a los 7 días, Graph a los 3
-  subscription_id: Optional[str] = None  # id de la subscription de Graph, solo Microsoft
+  watch_expires_at: Optional[datetime] = None  # Gmail caduca a los 7 días
 
   id: ObjectId = field(default_factory=ObjectId)
   created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

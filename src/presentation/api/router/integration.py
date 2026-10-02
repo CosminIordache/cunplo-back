@@ -13,16 +13,9 @@ from src.container import Container
 from src.domain.integration import Provider
 from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.integration_service import IntegrationService
-from src.application.use_cases.outlook_service import OutlookService
 from src.application.use_cases.whatsapp_service import GowaError, WhatsAppService
 from src.infrastructure.external_services.gmail import GmailError
-from src.infrastructure.external_services.outlook import OutlookError
 from src.infrastructure.external_services.google_oauth import GMAIL_SCOPE, google
-from src.infrastructure.external_services.microsoft_oauth import (
-  CLAIMS_OPTIONS,
-  MAIL_SCOPE,
-  microsoft,
-)
 from src.presentation.api.schemas.integration import (
   IntegrationOut,
   WhatsAppCodeIn,
@@ -37,20 +30,17 @@ router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 Service = Annotated[IntegrationService, Depends(Provide[Container.integration_service])]
 Gmail = Annotated[GmailService, Depends(Provide[Container.gmail_service])]
-Outlook = Annotated[OutlookService, Depends(Provide[Container.outlook_service])]
 WhatsApp = Annotated[WhatsAppService, Depends(Provide[Container.whatsapp_service])]
 
 
 async def disconnect_integration(
   integration,
   gmail_service: GmailService,
-  outlook_service: OutlookService,
   whatsapp_service: WhatsAppService,
 ) -> bool:
   """Cada provider corta su push a su manera; la fila dice cuál toca."""
   service = {
     Provider.GOOGLE: gmail_service,
-    Provider.MICROSOFT: outlook_service,
     Provider.WHATSAPP: whatsapp_service,
   }[integration.provider]
   return await service.disconnect(integration)
@@ -111,51 +101,6 @@ async def google_connect_callback(
   return RedirectResponse(os.getenv("FRONTEND_REDIRECT", "/"))
 
 
-@router.get("/microsoft/connect")
-async def microsoft_connect(request: Request, user: CurrentUser):
-  """Conectar Outlook con sesión ya iniciada (por Google o por Microsoft)."""
-  # Microsoft tampoco reenvía el Bearer al volver: el usuario viaja en la sesión firmada
-  request.session["connect_user_id"] = str(user.id)
-  return await microsoft.authorize_redirect(
-    request,
-    str(request.url_for("microsoft_connect_callback")),
-    scope=MAIL_SCOPE,
-  )
-
-
-@router.get("/microsoft/callback", name="microsoft_connect_callback")
-@inject
-async def microsoft_connect_callback(
-  request: Request, service: Service, outlook_service: Outlook
-):
-  user_id = request.session.pop("connect_user_id", None)
-  if not user_id:
-    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "connect session expired")
-  try:
-    token = await microsoft.authorize_access_token(request, claims_options=CLAIMS_OPTIONS)
-  except OAuthError:
-    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "microsoft auth failed")
-
-  claims = token["userinfo"]
-  saved = await service.connect(
-    user_id=ObjectId(user_id),
-    provider=Provider.MICROSOFT,
-    account_id=claims["sub"],
-    email=claims.get("email") or claims["preferred_username"],
-    scopes=token.get("scope", "").split(),
-    token=token,
-  )
-
-  # El push es opcional: si la URL no está configurada, conectar sigue funcionando
-  if os.getenv("GRAPH_NOTIFICATION_URL"):
-    try:
-      await outlook_service.start_subscription(saved)
-    except OutlookError:
-      logfire.exception("Could not start Graph subscription for {email}", email=saved.email)
-
-  return RedirectResponse(os.getenv("FRONTEND_REDIRECT", "/"))
-
-
 @router.post("/whatsapp/connect", response_model=WhatsAppQrOut)
 @inject
 async def whatsapp_connect(user: CurrentUser, whatsapp_service: WhatsApp):
@@ -207,11 +152,10 @@ async def disconnect(
   user: CurrentUser,
   service: Service,
   gmail_service: Gmail,
-  outlook_service: Outlook,
   whatsapp_service: WhatsApp,
 ):
   """Por id: el usuario puede tener varias cuentas del mismo provider."""
   integration = await service.get(id, user.id)
   if not integration:
     raise HTTPException(status.HTTP_404_NOT_FOUND, "integration not found")
-  return await disconnect_integration(integration, gmail_service, outlook_service, whatsapp_service)
+  return await disconnect_integration(integration, gmail_service, whatsapp_service)

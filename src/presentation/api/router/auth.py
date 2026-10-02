@@ -8,11 +8,6 @@ from dependency_injector.wiring import inject, Provide
 
 from src.container import Container
 from src.infrastructure.external_services.google_oauth import LOGIN_SCOPE, google
-from src.infrastructure.external_services.microsoft_oauth import (
-  CLAIMS_OPTIONS,
-  LOGIN_SCOPE as MS_LOGIN_SCOPE,
-  microsoft,
-)
 from src.domain.user import AuthProvider, User
 from src.application.use_cases.auth_service import (
   AuthService,
@@ -91,37 +86,6 @@ async def google_callback(
 
   user, jwt_token = await service.login_oauth(AuthProvider.GOOGLE, token["userinfo"])
   # idempotente: solo abre el trial la primera vez que entra
-  await subscriptions.start_trial(user.id)
-
-  redirect = RedirectResponse(os.getenv("FRONTEND_REDIRECT", "/"))
-  set_session_cookie(redirect, jwt_token)
-  return redirect
-
-
-@router.get("/microsoft")
-async def microsoft_login(request: Request):
-  """Solo identidad: los buzones se conectan aparte, en /integrations/microsoft/connect."""
-  return await microsoft.authorize_redirect(
-    request, str(request.url_for("microsoft_callback")), scope=MS_LOGIN_SCOPE
-  )
-
-
-@router.get("/microsoft/callback", name="microsoft_callback")
-@inject
-async def microsoft_callback(
-  request: Request, service: Service, subscriptions: Subscriptions
-):
-  try:
-    token = await microsoft.authorize_access_token(request, claims_options=CLAIMS_OPTIONS)
-  except OAuthError:
-    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "microsoft auth failed")
-
-  claims = token["userinfo"]
-  # las cuentas personales no siempre traen 'email': 'preferred_username' es el fallback
-  email = claims.get("email") or claims["preferred_username"]
-  user, jwt_token = await service.login_oauth(
-    AuthProvider.MICROSOFT, {**claims, "email": email}
-  )
   await subscriptions.start_trial(user.id)
 
   redirect = RedirectResponse(os.getenv("FRONTEND_REDIRECT", "/"))

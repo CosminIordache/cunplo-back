@@ -7,9 +7,6 @@ from arq.connections import RedisSettings, create_pool
 from src.infrastructure.driven.redis.functions.process_gmail_notification import (
   process_gmail_notification,
 )
-from src.infrastructure.driven.redis.functions.process_outlook_sync import (
-  process_outlook_sync,
-)
 from src.infrastructure.driven.redis.functions.process_whatsapp_message import (
   process_whatsapp_message,
 )
@@ -49,7 +46,6 @@ async def startup(ctx) -> None:
 
   for name in (
     "gmail_service",
-    "outlook_service",
     "integration_service",
     "integration_repository",
     "message_service",
@@ -75,11 +71,10 @@ class WorkerSettings:
   # los jobs de buzón se reintentan mientras otro del mismo buzón tiene el lock (mailbox_lock)
   functions = [
     func(process_gmail_notification, max_tries=MAX_TRIES),
-    func(process_outlook_sync, max_tries=MAX_TRIES),
     # el análisis de un chat también va con lock (mailbox_lock): uno a la vez por chat
     func(process_whatsapp_message, max_tries=MAX_TRIES),
   ]
-  # Graph solo da ~3 días de subscription: diario a las 4:00 va sobrado
+  # Gmail da 7 días de watch: diario a las 4:00 va sobrado
   cron_jobs = [cron(renew_watches, hour=4, minute=0)]
   redis_settings = REDIS
   on_startup = startup

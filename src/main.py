@@ -17,7 +17,7 @@ from joserfc.errors import JoseError
 
 from src.container import Container
 from src.infrastructure.utils.security import COOKIE_NAME, JWT_TTL, create_token, decode_token, set_session_cookie
-from src.infrastructure.driving import gmail_webhook, outlook_webhook, whatsapp_webhook
+from src.infrastructure.driving import gmail_webhook, whatsapp_webhook
 from src.presentation.api.router import assistant, attachment, auth, contact, events, graph, integration, message, subscription, task, transcription, usage, user
 
 container = Container()
@@ -37,7 +37,6 @@ app.include_router(user.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(integration.router, prefix="/api/v1")
 app.include_router(gmail_webhook.router, prefix="/api/v1")
-app.include_router(outlook_webhook.router, prefix="/api/v1")
 app.include_router(whatsapp_webhook.router, prefix="/api/v1")
 app.include_router(contact.router, prefix="/api/v1")
 app.include_router(task.router, prefix="/api/v1")

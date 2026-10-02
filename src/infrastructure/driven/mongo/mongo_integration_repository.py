@@ -72,11 +72,6 @@ class MongoIntegrationRepository:
     doc = await self.collection.find_one({"provider": provider, "account_id": account_id})
     return _to_integration(doc) if doc else None
 
-  async def get_by_subscription(self, subscription_id: str) -> Optional[Integration]:
-    # el webhook de Graph solo trae el id de la subscription: es la única entrada
-    doc = await self.collection.find_one({"subscription_id": subscription_id})
-    return _to_integration(doc) if doc else None
-
   async def list_by_user(
     self, user_id: ObjectId, provider: Optional[Provider] = None
   ) -> list[Integration]:

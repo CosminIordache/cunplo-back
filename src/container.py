@@ -12,7 +12,6 @@ from src.application.use_cases.auth_service import AuthService
 from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.graph_service import GraphService
-from src.application.use_cases.outlook_service import OutlookService
 from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.message_service import MessageService
 from src.application.use_cases.subscription_service import SubscriptionService
@@ -65,15 +64,14 @@ async def create_indexes(db) -> None:
   await db["integrations"].create_index([("provider", 1), ("phone", 1)])
   # el webhook de WhatsApp solo trae el device_id de GOWA, que es nuestro account_id
   await db["integrations"].create_index([("provider", 1), ("account_id", 1)])
-  # el webhook de Graph solo trae el id de la subscription
-  # único: con varias cuentas de Microsoft dos filas no pueden compartir subscription
-  # parcial y no sparse: el campo existe con null en las filas sin suscripción (Gmail, o
-  # Microsoft antes del primer start_subscription) y sparse solo excluye el campo ausente
-  await db["integrations"].create_index(
-    "subscription_id",
-    unique=True,
-    partialFilterExpression={"subscription_id": {"$type": "string"}},
+  # ponytail: Outlook/Microsoft se quitó; limpia sus restos en cada arranque (idempotente).
+  # Quitar cuando haya corrido en producción. Sin el $unset, Integration(**doc) revienta.
+  await db["integrations"].delete_many({"provider": "microsoft"})
+  await db["integrations"].update_many(
+    {"subscription_id": {"$exists": True}}, {"$unset": {"subscription_id": ""}}
   )
+  if "subscription_id_1" in await db["integrations"].index_information():
+    await db["integrations"].drop_index("subscription_id_1")
   # el id de Gmail solo es único dentro de una cuenta: la pareja evita duplicar
   await db["messages"].create_index([("integration_id", 1), ("provider_id", 1)], unique=True)
   # el hilo se lee ordenado por fecha, acotado a la cuenta
@@ -164,7 +162,6 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
-      "src.infrastructure.driving.outlook_webhook",
       "src.infrastructure.driving.whatsapp_webhook",
     ]
   )
@@ -240,17 +237,6 @@ class Container(containers.DeclarativeContainer):
   assistant_service = providers.Singleton(AssistantService, db=db, usage_service=usage_service)
   transcription_service = providers.Factory(TranscriptionService, usage_service=usage_service)
 
-  # vacío desactiva el push de Outlook, como PUBSUB_TOPIC con Gmail
-  config.graph_notification_url.from_env("GRAPH_NOTIFICATION_URL", "")
-  config.graph_client_state.from_env("GRAPH_CLIENT_STATE", "")
-  outlook_service = providers.Factory(
-    OutlookService,
-    repository=integration_repository,
-    integrations=integration_service,
-    notification_url=config.graph_notification_url,
-    secret=config.graph_client_state,
-  )
-
   config.pubsub_topic.from_env("PUBSUB_TOPIC", "")
   gmail_service = providers.Factory(
     GmailService,
@@ -259,7 +245,7 @@ class Container(containers.DeclarativeContainer):
     topic=config.pubsub_topic,
   )
 
-  # el webhook se registra en cada device de GOWA al crearlo, como la subscription de Graph
+  # el webhook se registra en cada device de GOWA al crearlo
   config.whatsapp_webhook_url.from_env("WHATSAPP_WEBHOOK_URL", "")
   config.gowa_webhook_secret.from_env("GOWA_WEBHOOK_SECRET", "")
   whatsapp_service = providers.Factory(

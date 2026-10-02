@@ -86,7 +86,7 @@ class WhatsAppService:
     try:
       await gowa.remove_device(integration.account_id)
     except GowaError as error:
-      # GOWA caído o el device ya no existe: borramos igual, como Gmail y Outlook
+      # GOWA caído o el device ya no existe: borramos igual, como Gmail
       logfire.warning(
         "Could not remove the GOWA device for {phone}: {error}",
         phone=integration.phone,

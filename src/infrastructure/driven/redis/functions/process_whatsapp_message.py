@@ -97,7 +97,7 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
   mensaje se guarda (es el contexto del chat); solo el job del último mensaje de la
   ráfaga llama al agente, con todo lo llegado desde el último análisis. Un "hola" y la
   petición que le sigue son así una sola llamada. Lo encola el webhook de GOWA, que ya
-  trae el mensaje: no hay nada que sincronizar. El resto como process_outlook_sync."""
+  trae el mensaje: no hay nada que sincronizar. El resto como process_gmail_notification."""
   # ponytail: un chat que nunca calla DEBOUNCE_SECONDS no se analiza hasta la pausa;
   # añadir una espera máxima si pasa de verdad
   integration_oid, user_oid = ObjectId(integration_id), ObjectId(user_id)

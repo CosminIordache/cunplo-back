@@ -10,7 +10,6 @@ from pydantic_extra_types.language_code import LanguageAlpha2
 
 class AuthProvider(StrEnum):
   GOOGLE = "google"
-  MICROSOFT = "microsoft"
 
 
 class Role(StrEnum):
@@ -53,8 +52,7 @@ class User:
   company_size: Optional[CompanySize] = None
   company_sector: Optional[CompanySector] = None
 
-  # ponytail: URL del proveedor, no la copiamos a storage propio. Microsoft no la da
-  # (Graph solo sirve /me/photo/$value binario), así que ahí queda None.
+  # ponytail: URL del proveedor, no la copiamos a storage propio.
   picture: Optional[str] = None
 
   # idioma en el que el agente escribe las tareas

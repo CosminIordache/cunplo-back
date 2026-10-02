@@ -50,7 +50,6 @@ class IntegrationService:
       # estado de sincronización: sobrevive a los refrescos de token
       history_id=existing.history_id if existing else None,
       watch_expires_at=existing.watch_expires_at if existing else None,
-      subscription_id=existing.subscription_id if existing else None,
     )
 
     return await self.repository.upsert(integration)

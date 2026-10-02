@@ -1,10 +1,8 @@
 from src.domain.integration import Provider
 from src.infrastructure.external_services.google_oauth import refresh_token as google_refresh
-from src.infrastructure.external_services.microsoft_oauth import refresh_token as microsoft_refresh
 
 REFRESHERS = {
   Provider.GOOGLE: google_refresh,
-  Provider.MICROSOFT: microsoft_refresh,
 }
 
 

@@ -144,8 +144,8 @@ def _epoch_ms(timestamp: str) -> int:
 
 
 def to_message(payload: dict, owner_phone: str) -> dict:
-  """El payload de un evento 'message' al mismo dict que gmail._to_message y
-  outlook._to_message: aguas abajo solo cambia el canal."""
+  """El payload de un evento 'message' al mismo dict que gmail._to_message:
+  aguas abajo solo cambia el canal."""
   chat = payload["chat_id"]
   if payload.get("is_from_me"):
     # lo escribe el dueño: el remitente es su número y el destinatario, la otra persona
