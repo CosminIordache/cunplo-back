@@ -1,4 +1,5 @@
 import base64
+import mimetypes
 import os
 from datetime import datetime
 from typing import Any
@@ -93,6 +94,43 @@ async def remove_device(device_id: str) -> None:
   await _request("DELETE", f"/devices/{device_id}")
 
 
+async def media(path: str) -> bytes:
+  """Un adjunto que GOWA ya descargó (WHATSAPP_AUTO_DOWNLOAD_MEDIA, activo por defecto).
+  Como el QR: solo vale la ruta 'statics/media/...'."""
+  try:
+    async with _client() as client:
+      response = await client.get("/" + path.lstrip("/"))
+  except httpx.HTTPError as error:
+    raise GowaError(f"GOWA unreachable: {error}") from error
+  if response.is_error:
+    raise GowaError(f"GOWA media {response.status_code}")
+  return response.content
+
+
+# los adjuntos que se guardan; sticker y video_note no dicen nada de una tarea
+MEDIA_KINDS = ("audio", "document", "image", "video")
+
+
+def attachment(payload: dict) -> dict | None:
+  """El adjunto del mensaje con la forma que espera attachment_service. Con auto-download
+  el campo es la ruta, o {path, caption} si lleva texto; sin él es {url} a
+  mmg.whatsapp.net, cifrado e inútil."""
+  for kind in MEDIA_KINDS:
+    value = payload.get(kind)
+    path = value.get("path") if isinstance(value, dict) else value
+    if path:
+      # GOWA renombra el archivo al guardarlo: el nombre original no llega
+      filename = path.rpartition("/")[2]
+      return {
+        "kind": kind,
+        "path": path,
+        "attachment_id": kind,  # un mensaje de WhatsApp lleva un solo adjunto
+        "filename": filename,
+        "mime_type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
+      }
+  return None
+
+
 def jid_to_phone(jid: str) -> str | None:
   """'34600112233@s.whatsapp.net' (o con ':12' de dispositivo) -> '+34600112233'.
   Un JID '@lid' es un id anónimo, no un número: None."""
@@ -124,6 +162,8 @@ def to_message(payload: dict, owner_phone: str) -> dict:
     "to": to,
     "cc": "",
     "subject": "",
+    # el caption de un adjunto ya viene en body; el adjunto lo convierte en texto el job
     "body": payload.get("body") or "",
+    "media": attachment(payload),
     "internal_date": _epoch_ms(payload["timestamp"]),
   }

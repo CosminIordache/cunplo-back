@@ -3,6 +3,7 @@ import logfire
 from typing import Optional
 from bson import ObjectId
 
+from src.application.use_cases.agent_service import AgentAttachment
 from src.domain.attachment import Attachment
 from src.domain.message import Message
 from src.application.ports.attachment_repository import AttachmentRepository
@@ -10,7 +11,17 @@ from src.application.ports.storage import Storage
 from src.application.use_cases.integration_service import ReauthRequired
 from src.domain.integration import Integration, Provider
 from src.application.use_cases.integration_service import IntegrationService
-from src.infrastructure.external_services import gmail, outlook
+from src.infrastructure.external_services import gmail, gowa, outlook
+
+
+# lo que el modelo puede leer; el resto le llega solo por nombre
+READABLE = ("image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf")
+# ponytail: tope fijo por fichero; subirlo si se escapan tareas por PDFs grandes
+MAX_READ_BYTES = 10 * 1024 * 1024
+
+
+def _readable(mime_type: str, size: int) -> bool:
+  return mime_type in READABLE and size <= MAX_READ_BYTES
 
 
 def _key(message: Message, attachment: dict) -> str:
@@ -35,44 +46,114 @@ class AttachmentService:
   async def _bytes(
     self, integration: Integration, token: str, provider_id: str, attachment: dict
   ) -> bytes:
-    """Graph ya manda los bytes en el listado; Gmail obliga a una llamada por fichero."""
+    """Graph ya manda los bytes en el listado; Gmail obliga a una llamada por fichero;
+    WhatsApp lo tiene ya descargado en GOWA. Si for_agent ya los bajó, se reutilizan."""
+    if data := attachment.get("data"):
+      return data
+    if integration.provider == Provider.WHATSAPP:
+      return await gowa.media(attachment["path"])
     if content := attachment.get("content_bytes"):
       return base64.b64decode(content)
     if integration.provider == Provider.MICROSOFT:
       return await outlook.get_attachment(token, provider_id, attachment["attachment_id"])
     return await gmail.get_attachment(token, provider_id, attachment["attachment_id"])
 
+  async def _resolve(
+    self, integration: Integration, provider_id: str, raw_message: dict
+  ) -> tuple[str, list[dict]]:
+    """El token y la lista de adjuntos del mensaje. El listado de Graph se deja en
+    raw_message: la segunda llamada (guardar tras analizar) ya no lo repite."""
+    attachments = raw_message.get("attachments") or []
+    # Gmail los trae en el propio mensaje; el delta de Graph solo dice si los hay
+    needs_listing = not attachments and raw_message.get("has_attachments")
+    if not attachments and not needs_listing:
+      return "", []
+
+    token = ""  # GOWA no usa tokens: su Basic Auth la pone gowa.py
+    if integration.provider != Provider.WHATSAPP:
+      try:
+        token = await self.integrations.access_token_for(integration)
+      except ReauthRequired:
+        logfire.warning(
+          "No token for {email}: attachments of {provider_id} not fetched",
+          email=integration.email,
+          provider_id=provider_id,
+        )
+        return "", []
+
+    if needs_listing:
+      try:
+        attachments = await outlook.list_attachments(token, provider_id)
+      except outlook.OutlookError as error:
+        logfire.warning(
+          "Could not list attachments of {provider_id}: {error}",
+          provider_id=provider_id,
+          error=error,
+        )
+        return "", []
+      raw_message["attachments"] = attachments
+    return token, attachments
+
+  async def for_agent(
+    self, integration: Integration, provider_id: str, raw_message: dict
+  ) -> list[AgentAttachment]:
+    """Los adjuntos de un mensaje nuevo para el agente, antes de saber si se guarda.
+    Los legibles se bajan y los bytes se quedan en el dict ("data"): store_for_message
+    los reutiliza en vez de pedirlos otra vez."""
+    token, attachments = await self._resolve(integration, provider_id, raw_message)
+    result = []
+    for attachment in attachments:
+      if _readable(attachment["mime_type"], attachment.get("size") or 0):
+        try:
+          attachment["data"] = await self._bytes(integration, token, provider_id, attachment)
+        except (gmail.GmailRateLimited, outlook.OutlookRateLimited):
+          raise  # el job lo convierte en Retry: el marcador no avanzó
+        except Exception as error:
+          # sin el contenido el agente aún tiene el nombre: no tumba el análisis
+          logfire.warning(
+            "Could not fetch attachment {filename} of {provider_id} for the agent: {error}",
+            filename=attachment.get("filename"),
+            provider_id=provider_id,
+            error=str(error),
+          )
+      data = attachment.get("data")
+      result.append(AgentAttachment(
+        filename=attachment["filename"],
+        mime_type=attachment["mime_type"],
+        data=data if data and _readable(attachment["mime_type"], len(data)) else None,
+      ))
+    return result
+
+  async def for_agent_stored(
+    self, user_id: ObjectId, message_ids: list[ObjectId], with_data: bool = False
+  ) -> dict[ObjectId, list[AgentAttachment]]:
+    """Los adjuntos ya guardados de un lote de mensajes, para el agente. Sin with_data
+    (el hilo previo) solo el nombre; con él (la ráfaga de WhatsApp) también el contenido
+    de los legibles, leído del bucket."""
+    grouped: dict[ObjectId, list[AgentAttachment]] = {}
+    for message_id, attachments in (await self.by_message_id(user_id, message_ids)).items():
+      for attachment in attachments:
+        data = None
+        if with_data and _readable(attachment.mime_type, attachment.size):
+          try:
+            data = await self.storage.get(attachment.storage_key)
+          except Exception as error:
+            logfire.warning(
+              "Could not read attachment {key} for the agent: {error}",
+              key=attachment.storage_key,
+              error=str(error),
+            )
+        grouped.setdefault(message_id, []).append(
+          AgentAttachment(filename=attachment.filename, mime_type=attachment.mime_type, data=data)
+        )
+    return grouped
+
   async def store_for_message(
     self, integration: Integration, message: Message, raw_message: dict
   ) -> list[Attachment]:
     """Baja los adjuntos del proveedor, los sube al bucket y guarda el metadato.
     Un adjunto que falle no puede tumbar el correo entero: se registra y se sigue."""
-    attachments = raw_message.get("attachments") or []
-    # Gmail los trae en el propio mensaje; el delta de Graph solo dice si los hay
-    needs_listing = not attachments and raw_message.get("has_attachments")
-    if not attachments and not needs_listing:
-      return []
-
-    try:
-      token = await self.integrations.access_token_for(integration)
-    except ReauthRequired:
-      logfire.warning(
-        "No token for {email}: attachments of {provider_id} not stored",
-        email=integration.email,
-        provider_id=message.provider_id,
-      )
-      return []
-
-    if needs_listing:
-      try:
-        attachments = await outlook.list_attachments(token, message.provider_id)
-      except outlook.OutlookError as error:
-        logfire.warning(
-          "Could not list attachments of {provider_id}: {error}",
-          provider_id=message.provider_id,
-          error=error,
-        )
-        return []
+    token, attachments = await self._resolve(integration, message.provider_id, raw_message)
 
     stored = []
     for attachment in attachments:
@@ -90,7 +171,7 @@ class AttachmentService:
               attachment_id=attachment["attachment_id"],
               filename=attachment["filename"],
               mime_type=attachment["mime_type"],
-              size=attachment["size"],
+              size=attachment.get("size") or len(data),  # GOWA no manda el tamaño
               storage_key=key,
             )
           )

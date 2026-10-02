@@ -1,7 +1,9 @@
+from email.utils import getaddresses, parseaddr
+
 import logfire
 from arq import Retry
 
-from src.application.use_cases.agent_service import AgentEmailMessage
+from src.application.use_cases.agent_service import AgentAttachment, AgentEmailMessage
 from src.infrastructure.driven.redis.functions.events import ERROR, NO_TASK, NOT_CONTACT, PROCESSED, PROCESSING, SKIPPED, publish
 from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact, resolve_contacts
 from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
@@ -13,7 +15,21 @@ from src.domain.task import Task
 from src.application.use_cases.task_service import existing_task_id
 
 
-def _to_agent_message(message: dict) -> AgentEmailMessage:
+def _counterparts(message: dict, owner: str) -> list[str]:
+  """Con quién es el correo: el remitente, o los destinatarios si lo envía el dueño."""
+  if parseaddr(message["sender"])[1].lower() != owner.lower():
+    return [message["sender"]]
+  return [address for _, address in getaddresses([message["to"], message["cc"] or ""]) if address]
+
+
+async def _with_contact(ctx, user_id, message: dict, owner: str) -> bool:
+  for address in _counterparts(message, owner):
+    if await is_known_contact(ctx, user_id, address):
+      return True
+  return False
+
+
+def _to_agent_message(message: dict, attachments: list[AgentAttachment]) -> AgentEmailMessage:
   """El correo tal y como lo devuelve Gmail: dict, no dominio."""
   return AgentEmailMessage(
     thread_id=message["thread_id"],
@@ -22,10 +38,11 @@ def _to_agent_message(message: dict) -> AgentEmailMessage:
     cc=message["cc"] or None,
     subject=message["subject"],
     body=message["body"],
+    attachments=attachments,
   )
 
 
-def _stored_to_agent_message(message: Message) -> AgentEmailMessage:
+def _stored_to_agent_message(message: Message, attachments: list[AgentAttachment]) -> AgentEmailMessage:
   return AgentEmailMessage(
     thread_id=message.thread_id,
     sender=message.sender,
@@ -33,6 +50,7 @@ def _stored_to_agent_message(message: Message) -> AgentEmailMessage:
     cc=message.cc,
     subject=message.subject,
     body=message.body,
+    attachments=attachments,
   )
 
 
@@ -85,7 +103,8 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
     await publish(ctx, user_id, PROCESSING, **event)
     try:
 
-      if only_contacts and not await is_known_contact(ctx, user_id, message["sender"]):
+      # en un correo propio cuentan los destinatarios: el dueño no es contacto suyo
+      if only_contacts and not await _with_contact(ctx, user_id, message, email):
         logfire.info("Message {message_id} from a non-contact, skipped", message_id=message["id"], email=email)
         await publish(ctx, user_id, SKIPPED, reason=NOT_CONTACT, **event)
         continue
@@ -98,12 +117,17 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
         user_id, integration.id, thread_id
       )
 
+      # los adjuntos del correo nuevo se bajan antes de saber si se guarda: el agente los
+      # necesita para decidir. store_for_message reutiliza los bytes
+      attachments = await ctx["attachment_service"].for_agent(integration, message["id"], message)
+      context_attachments = await ctx["attachment_service"].for_agent_stored(user_id, [m.id for m in stored])
+
       extracted = await ctx["agent_service"].run_tasks(
         user_id=user_id,
         owner_email=email,
         task_language=user.task_language,
-        thread_messages=[_stored_to_agent_message(m) for m in stored] or None,
-        new_messages=[_to_agent_message(message)],
+        thread_messages=[_stored_to_agent_message(m, context_attachments.get(m.id, [])) for m in stored] or None,
+        new_messages=[_to_agent_message(message, attachments)],
         thread_tasks=thread_tasks,
       )
 

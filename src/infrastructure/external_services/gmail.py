@@ -112,8 +112,15 @@ async def get_attachment(access_token: str, message_id: str, attachment_id: str)
     return base64.urlsafe_b64decode(_check(response).json()["data"])
 
 
+# lo que se procesa: lo que entra y lo que envía el dueño. Fuera quedan borradores,
+# spam, papelera y lo archivado por filtros
+LABELS = ("INBOX", "SENT")
+
+
 async def new_message_ids(access_token: str, start_history_id: str) -> tuple[list[str], str]:
-  """IDs de mensajes añadidos desde start_history_id, y el nuevo marcador."""
+  """IDs de mensajes añadidos desde start_history_id, y el nuevo marcador. Sin labelId
+  en la petición: Gmail filtra por hilo, y un hilo que abre el dueño no está en INBOX
+  hasta que le contestan. Se filtra aquí por las etiquetas de cada mensaje."""
   async with httpx.AsyncClient(timeout=30) as http:
     response = await http.get(
       f"{API}/history",
@@ -121,18 +128,19 @@ async def new_message_ids(access_token: str, start_history_id: str) -> tuple[lis
       params={
         "startHistoryId": start_history_id,
         "historyTypes": "messageAdded",
-        "labelId": "INBOX",
       },
     )
     if response.status_code == 404:
       raise HistoryTooOld
     data = _check(response).json()
 
-  ids = [
+  # dict.fromkeys: sin repetidos y en orden; un correo a uno mismo trae INBOX y SENT
+  ids = list(dict.fromkeys(
     added["message"]["id"]
     for entry in data.get("history", [])
     for added in entry.get("messagesAdded", [])
-  ]
+    if set(added["message"].get("labelIds", [])) & set(LABELS)
+  ))
   # sin cambios Gmail omite historyId: conserva el marcador que ya teníamos
   return ids, str(data.get("historyId") or start_history_id)
 
@@ -150,7 +158,8 @@ async def watch(access_token: str, topic: str) -> dict:
     response = await http.post(
       f"{API}/watch",
       headers=_auth(access_token),
-      json={"topicName": topic, "labelIds": ["INBOX"]},
+      # SENT también: un hilo que abre el dueño no toca INBOX y no habría aviso
+      json={"topicName": topic, "labelIds": list(LABELS)},
     )
     return _check(response).json()  # {historyId, expiration}
 

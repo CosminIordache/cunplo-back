@@ -59,6 +59,7 @@ async def startup(ctx) -> None:
     "user_service",
     "subscription_service",
     "agent_service",
+    "transcription_service",
   ):
     ctx[name] = await getattr(container, name)()
   logfire.info("ARQ worker started!")

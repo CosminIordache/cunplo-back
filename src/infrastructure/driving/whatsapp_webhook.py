@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from src.application.ports.integration_repository import IntegrationRepository
 from src.container import Container
 from src.domain.integration import Provider
-from src.infrastructure.external_services.gowa import jid_to_phone, to_message
+from src.infrastructure.external_services.gowa import attachment, jid_to_phone, to_message
 from src.infrastructure.driven.redis.functions.process_whatsapp_message import (
   DEBOUNCE_SECONDS,
   KEY_TTL_SECONDS,
@@ -52,8 +52,8 @@ async def whatsapp_push(request: Request, queue: Queue, repository: Repository):
     return Response(status_code=status.HTTP_200_OK)
   if (payload.get("chat_id") or "").endswith(IGNORED_CHATS):
     return Response(status_code=status.HTTP_200_OK)
-  # ponytail: solo texto; notas de voz (transcription_service) y adjuntos, más adelante
-  if not payload.get("body"):
+  # sin texto ni adjunto útil (sticker, reacción, ubicación...) no hay nada que analizar
+  if not (payload.get("body") or attachment(payload)):
     return Response(status_code=status.HTTP_200_OK)
 
   # session_id es el device_id que registramos, nuestro account_id. Si GOWA no lo

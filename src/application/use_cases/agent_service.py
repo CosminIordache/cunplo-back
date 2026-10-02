@@ -1,10 +1,10 @@
 import logfire
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal, Optional, List
 
 from bson import ObjectId
-from pydantic_ai import Agent
+from pydantic_ai import Agent, BinaryContent
 
 from src.application.use_cases.usage_service import UsageService
 from src.domain.task import Status, Task
@@ -30,6 +30,15 @@ class ExtractedTask:
   due_at: Optional[datetime] = None
 
 @dataclass
+class AgentAttachment:
+  filename: str
+  mime_type: str
+  # el contenido solo va en los mensajes nuevos que el modelo puede leer (imagen, PDF);
+  # el resto, y todo el hilo previo, le llega por nombre
+  data: Optional[bytes] = None
+
+
+@dataclass
 class AgentEmailMessage:
   thread_id: str
   
@@ -39,6 +48,7 @@ class AgentEmailMessage:
   body: str
   cc: Optional[str] = None
   channel: Literal["email", "whatsapp"] = "email"
+  attachments: List[AgentAttachment] = field(default_factory=list)
 
 INSTRUCTIONS = """
 Llevas el control del trabajo pendiente de un autónomo o pequeño negocio a partir de su correo
@@ -64,6 +74,10 @@ qué lado estás: si el CORREO NUEVO sale del dueño, es él quien acaba de resp
 Una respuesta del dueño casi nunca crea una tarea: cambia el estado de la que ya existe
 ("vale, te lo envío mañana" pasa esa tarea a WAITING_RESPONSE o le pone fecha). Devuélvela
 con su task_id; solo es nueva si el dueño se compromete a algo que no está en TAREAS DEL HILO.
+Si el dueño ABRE el hilo (no hay hilo previo ni tareas) pidiendo algo a otra persona ("¿me
+mandas el presupuesto?"), es una tarea WAITING_RESPONSE: él espera la respuesta. Si al abrirlo
+se compromete a algo ("te paso la propuesta el lunes"), es TODO. Un correo del dueño que solo
+informa o agradece no lleva tarea.
 
 Campos:
 - title: frase corta con la acción concreta. No es un resumen del correo. Escríbelo siempre
@@ -116,6 +130,15 @@ de las TAREAS DEL HILO. Varios mensajes seguidos suelen ser una sola petición p
 trozos: no crees una tarea por trozo. Por eso en WhatsApp el CORREO NUEVO puede traer
 varios mensajes seguidos (la ráfaga desde el último análisis): analízalos juntos.
 Si dudas de quién es la acción, usa TO_VALIDATE en vez de adivinar.
+
+Adjuntos: cada correo dice qué ficheros lleva ("Adjuntos: ..."); en WhatsApp van en el propio
+mensaje ("[Imagen]", "[Documento PDF]", "[Nota de voz: ...]" ya transcrita). Las imágenes y
+PDF del CORREO NUEVO te llegan detrás del texto, cada uno precedido de su nombre. Míralos
+para saber si el mensaje responde de verdad a lo pedido: si el PDF es la factura o el
+presupuesto que se esperaba, si la foto es lo que se pidió. Si el texto dice "te adjunto la
+factura" pero no hay adjunto, o el adjunto no es lo pedido, la tarea no se cierra. Saca de
+ellos las fechas, importes o datos que solo vengan ahí. Un adjunto sin petición ni respuesta
+(un logo, un meme) no crea tarea.
 """
 
 
@@ -147,8 +170,17 @@ class AgentService:
       sender=new_message.sender,
       owner=owner_email,
     )
+    # los adjuntos legibles van detrás del texto, cada uno con su nombre delante para que
+    # el modelo sepa de qué mensaje es
+    files = [
+      part
+      for m in new_messages
+      for a in m.attachments
+      if a.data
+      for part in (f"Adjunto {a.filename} ({m.sender}):", BinaryContent(data=a.data, media_type=a.mime_type))
+    ]
     result = await self.agent.run(
-      self._prompt(owner_email, task_language, thread_messages, new_messages, thread_tasks)
+      [self._prompt(owner_email, task_language, thread_messages, new_messages, thread_tasks), *files]
     )
     
     await self.usage_service.record(
@@ -199,9 +231,11 @@ class AgentService:
     )
 
   def _format(self, message: AgentEmailMessage) -> str:
+    # en WhatsApp el adjunto ya va en el body ("[Imagen]") y GOWA le cambia el nombre
     if message.channel == "whatsapp":
       return f"Canal: WhatsApp\nFrom: {message.sender}\nTo: {message.to}\n\nMessage body: {message.body}"
+    attachments = ", ".join(a.filename for a in message.attachments) or "ninguno"
     return (
       f"From: {message.sender}\nTo: {message.to}\nCc: {message.cc}\n"
-      f"Subject: {message.subject}\n\nMessage body: {message.body}"
+      f"Subject: {message.subject}\nAdjuntos: {attachments}\n\nMessage body: {message.body}"
     )

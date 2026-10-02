@@ -2,11 +2,12 @@ import logfire
 
 from bson import ObjectId
 
-from src.application.use_cases.agent_service import AgentEmailMessage
+from src.application.use_cases.agent_service import AgentAttachment, AgentEmailMessage
 from src.infrastructure.driven.redis.functions.events import ERROR, NO_TASK, NOT_CONTACT, PROCESSED, PROCESSING, SKIPPED, publish
 from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact, resolve_contacts
 from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
 from src.domain.integration import Provider
+from src.infrastructure.external_services import gowa
 from src.domain.message import Message
 from src.domain.user import ContactsFilter
 from src.domain.task import Task
@@ -33,13 +34,53 @@ def done_key(integration_id: str, chat: str) -> str:
   return f"wa:done:{integration_id}:{chat}"
 
 
+# cómo ve el agente un adjunto: no se guarda el archivo, solo lo que pasó en el chat
+MEDIA_LABELS = {"audio": "Nota de voz", "document": "Documento", "image": "Imagen", "video": "Vídeo"}
+
+
+def media_key(integration_id: str, message_id: str) -> str:
+  """La nota de voz ya transcrita: el job se reintenta entero si el chat tiene el lock."""
+  return f"wa:media:{integration_id}:{message_id}"
+
+
+async def _media_text(ctx, integration_id: str, user_id: ObjectId, phone: str, message: dict) -> str:
+  """El body del mensaje con su adjunto convertido en texto. Una nota de voz se transcribe;
+  del resto basta con saber que se envió (y su caption, que ya viene en body)."""
+  media, body = message.get("media"), message["body"]
+  if not media:
+    return body
+  label = MEDIA_LABELS[media["kind"]]
+  if media["kind"] == "document":
+    # GOWA renombra el archivo al guardarlo: de su nombre original solo queda la extensión
+    label += f" {media['path'].rpartition('.')[2].upper()}"
+  if media["kind"] == "audio":
+    key = media_key(integration_id, message["id"])
+    cached = await ctx["redis"].get(key)
+    if cached is not None:
+      text = cached.decode()
+    else:
+      try:
+        audio = await gowa.media(media["path"])
+        text = await ctx["transcription_service"].audio_transcription(
+          audio, media["path"].rpartition("/")[2], user_id, phone
+        )
+      except Exception as error:
+        # ponytail: sin reintento; un audio que GOWA ya no tiene no vuelve. Reintentar si
+        # los fallos de OpenAI resultan ser transitorios
+        logfire.warning("Voice note {message_id} not transcribed: {error}", message_id=message["id"], error=str(error))
+        text = ""
+      await ctx["redis"].set(key, text, ex=3600)
+    label = f"{label}: {text}" if text else f"{label} (sin transcribir)"
+  return f"[{label}]\n{body}" if body else f"[{label}]"
+
+
 async def _publish_burst(ctx, user_id, integration_id, burst: list[Message], status: str, **data) -> None:
   """Un evento por mensaje de la ráfaga: el frontend los sigue por message_id, como en correo."""
   for m in burst:
     await publish(ctx, user_id, status, integration_id=integration_id, provider=Provider.WHATSAPP, thread_id=m.thread_id, message_id=m.provider_id, subject="", **data)
 
 
-def _stored_to_agent_message(message: Message) -> AgentEmailMessage:
+def _stored_to_agent_message(message: Message, attachments: list[AgentAttachment] | None = None) -> AgentEmailMessage:
   return AgentEmailMessage(
     thread_id=message.thread_id,
     sender=message.sender,
@@ -47,6 +88,7 @@ def _stored_to_agent_message(message: Message) -> AgentEmailMessage:
     subject="",
     body=message.body,
     channel="whatsapp",
+    attachments=attachments or [],
   )
 
 
@@ -83,8 +125,9 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
       await publish(ctx, user_oid, SKIPPED, reason=NOT_CONTACT, integration_id=integration_id, provider=Provider.WHATSAPP, thread_id=thread_id, message_id=message["id"], subject="")
       return
 
+    body = await _media_text(ctx, integration_id, user_oid, phone, message)
     # se guarda siempre, haya tarea o no: es el contexto del próximo análisis
-    await ctx["message_service"].upsert(
+    stored_message = await ctx["message_service"].upsert(
       Message(
         user_id=user_oid,
         integration_id=integration.id,
@@ -93,10 +136,14 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
         sender=message["sender"],
         to=message["to"],
         subject="",
-        body=message["body"],
+        body=body,
         internal_date=message["internal_date"],
       )
     )
+    if message.get("media"):
+      # ponytail: un reintento por lock lo vuelve a bajar y subir (mismo key, se pisa);
+      # y la nota de voz se baja dos veces, para transcribir y para el bucket
+      await ctx["attachment_service"].store_for_message(integration, stored_message, {"attachments": [message["media"]]})
 
     redis = ctx["redis"]
     last = await redis.get(last_key(integration_id, thread_id))
@@ -120,12 +167,14 @@ async def process_whatsapp_message(ctx, integration_id: str, user_id: str, messa
       await _publish_burst(ctx, user_oid, integration_id, burst, PROCESSING)
       try:
         thread_tasks = await ctx["task_service"].get_by_thread(user_oid, integration.id, thread_id)
+        # cada mensaje de la ráfaga ya subió su adjunto en su propio job: se lee del bucket
+        burst_attachments = await ctx["attachment_service"].for_agent_stored(user_oid, [m.id for m in burst], with_data=True)
         extracted = await ctx["agent_service"].run_tasks(
           user_id=user_oid,
           owner_email=phone,
           task_language=user.task_language,
           thread_messages=[_stored_to_agent_message(m) for m in previous[-CONTEXT_MESSAGES:]] or None,
-          new_messages=[_stored_to_agent_message(m) for m in burst],
+          new_messages=[_stored_to_agent_message(m, burst_attachments.get(m.id)) for m in burst],
           thread_tasks=thread_tasks,
         )
         await redis.set(done_key(integration_id, thread_id), burst[-1].internal_date, ex=KEY_TTL_SECONDS)

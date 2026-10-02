@@ -3,7 +3,7 @@ from arq import Retry
 
 from bson import ObjectId
 
-from src.application.use_cases.agent_service import AgentEmailMessage
+from src.application.use_cases.agent_service import AgentAttachment, AgentEmailMessage
 from src.infrastructure.driven.redis.functions.events import ERROR, NO_TASK, NOT_CONTACT, PROCESSED, PROCESSING, SKIPPED, publish
 from src.infrastructure.driven.redis.functions.contacts_filter import is_known_contact, resolve_contacts
 from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
@@ -14,7 +14,7 @@ from src.domain.task import Task
 from src.application.use_cases.task_service import existing_task_id
 
 
-def _to_agent_message(message: dict) -> AgentEmailMessage:
+def _to_agent_message(message: dict, attachments: list[AgentAttachment]) -> AgentEmailMessage:
   """El correo tal y como lo devuelve Graph: dict, no dominio."""
   return AgentEmailMessage(
     thread_id=message["thread_id"],
@@ -23,10 +23,11 @@ def _to_agent_message(message: dict) -> AgentEmailMessage:
     cc=message["cc"] or None,
     subject=message["subject"],
     body=message["body"],
+    attachments=attachments,
   )
 
 
-def _stored_to_agent_message(message: Message) -> AgentEmailMessage:
+def _stored_to_agent_message(message: Message, attachments: list[AgentAttachment]) -> AgentEmailMessage:
   return AgentEmailMessage(
     thread_id=message.thread_id,
     sender=message.sender,
@@ -34,6 +35,7 @@ def _stored_to_agent_message(message: Message) -> AgentEmailMessage:
     cc=message.cc,
     subject=message.subject,
     body=message.body,
+    attachments=attachments,
   )
 
 
@@ -97,12 +99,17 @@ async def _sync(ctx, integration_id: str, user_id: str) -> None:
           user_oid, integration.id, thread_id
         )
 
+        # los adjuntos del correo nuevo se bajan antes de saber si se guarda: el agente los
+        # necesita para decidir. store_for_message reutiliza los bytes
+        attachments = await ctx["attachment_service"].for_agent(integration, message["id"], message)
+        context_attachments = await ctx["attachment_service"].for_agent_stored(user_oid, [m.id for m in stored])
+
         extracted = await ctx["agent_service"].run_tasks(
           user_id=user_oid,
           owner_email=email,
           task_language=user.task_language,
-          thread_messages=[_stored_to_agent_message(m) for m in stored] or None,
-          new_messages=[_to_agent_message(message)],
+          thread_messages=[_stored_to_agent_message(m, context_attachments.get(m.id, [])) for m in stored] or None,
+          new_messages=[_to_agent_message(message, attachments)],
           thread_tasks=thread_tasks,
         )
 

@@ -24,6 +24,11 @@ class S3Storage:
       await s3.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
     return key
 
+  async def get(self, key: str) -> bytes:
+    async with self._client() as s3:
+      response = await s3.get_object(Bucket=self.bucket, Key=key)
+      return await response["Body"].read()
+
   async def delete(self, keys: list[str]) -> None:
     if not keys:
       return
