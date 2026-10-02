@@ -102,6 +102,9 @@ class TranscriptionService:
   ) -> str:
     """Un audio completo (ogg, mp3, m4a, wav...) a texto. filename solo sirve para que
     OpenAI deduzca el formato por la extensión."""
+    # las notas de voz de WhatsApp llegan como .oga (Ogg/Opus), que OpenAI rechaza por extensión
+    if filename.endswith(".oga"):
+      filename = filename[:-4] + ".ogg"
     result = await self.client.audio.transcriptions.create(model=FILE_MODEL, file=(filename, audio))
     # el usage llega en tokens o en segundos según facture el modelo, como en stream
     usage = result.usage
