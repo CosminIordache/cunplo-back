@@ -13,6 +13,7 @@ from src.container import Container
 from src.domain.integration import Provider
 from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.integration_service import IntegrationService
+from src.application.use_cases.task_service import TaskService
 from src.infrastructure.external_services.gmail import GmailError
 from src.infrastructure.external_services.google_oauth import GMAIL_SCOPE, google
 from src.presentation.api.schemas.integration import IntegrationOut
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 Service = Annotated[IntegrationService, Depends(Provide[Container.integration_service])]
 Gmail = Annotated[GmailService, Depends(Provide[Container.gmail_service])]
+Tasks = Annotated[TaskService, Depends(Provide[Container.task_service])]
 
 
 @router.get("", response_model=list[IntegrationOut])
@@ -87,9 +89,13 @@ async def disconnect(
   user: CurrentUser,
   service: Service,
   gmail_service: Gmail,
+  tasks: Tasks,
 ):
-  """Por id: el usuario puede tener varias cuentas del mismo provider."""
+  """Por id: el usuario puede tener varias cuentas del mismo provider. Primero se corta el
+  acceso; luego se borra lo que vino de esa cuenta (tareas, mensajes y adjuntos)."""
   integration = await service.get(id, user.id)
   if not integration:
     raise HTTPException(status.HTTP_404_NOT_FOUND, "integration not found")
-  return await gmail_service.disconnect(integration)
+  disconnected = await gmail_service.disconnect(integration)
+  await tasks.delete_by_integration(user.id, integration.id)
+  return disconnected

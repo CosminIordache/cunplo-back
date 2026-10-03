@@ -52,8 +52,20 @@ class TaskService:
     personas aunque ya no tengan tarea."""
     return await self.repository.delete(task_id, user_id)
 
+  async def delete_by_integration(self, user_id: ObjectId, integration_id: ObjectId) -> int:
+    """Al desconectar una cuenta: sus tareas y sus mensajes (con adjuntos) se van con ella."""
+    deleted_messages = await self.messages.delete_by_integration(user_id, integration_id)
+    deleted = await self.repository.delete_by_integration(user_id, integration_id)
+    logfire.info(
+      "Deleted {deleted} tasks and {deleted_messages} messages of integration {integration_id}",
+      deleted=deleted,
+      deleted_messages=deleted_messages,
+      integration_id=integration_id,
+    )
+    return deleted
+
   async def delete_all_by_user(self, user_id: ObjectId) -> int:
-    """Igual que delete pero para todo el usuario: las tareas se llevan sus mensajes."""
+    """Al borrar la cuenta: todas las tareas y todos los mensajes del usuario."""
     deleted_messages = await self.messages.delete_all_by_user(user_id)
     deleted = await self.repository.delete_all_by_user(user_id)
     logfire.info(

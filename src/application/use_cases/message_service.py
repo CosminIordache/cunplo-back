@@ -1,8 +1,14 @@
+from datetime import datetime, timedelta, UTC
+
 from bson import ObjectId
 
 from src.domain.message import Message
 from src.application.ports.message_repository import MessageRepository
 from src.application.use_cases.attachment_service import AttachmentService
+
+
+# Los correos son contexto para el agente, no un archivo: pasado este tiempo se borran
+RETENTION_DAYS = 90
 
 
 class MessageService:
@@ -51,3 +57,14 @@ class MessageService:
   async def delete_all_by_user(self, user_id: ObjectId) -> int:
     await self.attachments.delete_all_by_user(user_id)
     return await self.repository.delete_all_by_user(user_id)
+
+  async def delete_by_integration(self, user_id: ObjectId, integration_id: ObjectId) -> int:
+    ids = await self.repository.ids_by_integration(user_id, integration_id)
+    return await self.delete_many(user_id, ids)
+
+  async def purge_old(self) -> int:
+    """Por la fecha del correo (internal_date), no por cuándo se guardó."""
+    cutoff = datetime.now(UTC) - timedelta(days=RETENTION_DAYS)
+    grouped = await self.repository.ids_older_than(int(cutoff.timestamp() * 1000))
+    # ponytail: un usuario detrás de otro; basta mientras la purga diaria sea pequeña
+    return sum([await self.delete_many(user_id, ids) for user_id, ids in grouped.items()])

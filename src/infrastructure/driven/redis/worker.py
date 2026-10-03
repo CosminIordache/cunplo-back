@@ -8,6 +8,7 @@ from src.infrastructure.driven.redis.functions.process_gmail_notification import
   process_gmail_notification,
 )
 from src.infrastructure.driven.redis.functions.renew_watches import renew_watches
+from src.infrastructure.driven.redis.functions.purge_old_messages import purge_old_messages
 from src.infrastructure.driven.redis.functions.mailbox_lock import MAX_TRIES
 
 from dotenv import load_dotenv
@@ -69,7 +70,10 @@ class WorkerSettings:
     func(process_gmail_notification, max_tries=MAX_TRIES),
   ]
   # Gmail da 7 días de watch: diario a las 4:00 va sobrado
-  cron_jobs = [cron(renew_watches, hour=4, minute=0)]
+  cron_jobs = [
+    cron(renew_watches, hour=4, minute=0),
+    cron(purge_old_messages, hour=4, minute=30),
+  ]
   redis_settings = REDIS
   on_startup = startup
   on_shutdown = shutdown

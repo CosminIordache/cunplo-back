@@ -78,6 +78,8 @@ async def create_indexes(db) -> None:
   )
   # el asistente pide "los últimos correos" sin acotar a un hilo
   await db["messages"].create_index([("user_id", 1), ("internal_date", -1)])
+  # la purga diaria por antigüedad (purge_old_messages) busca en todos los usuarios
+  await db["messages"].create_index("internal_date")
   # el contexto del agente de correo: lo último hablado con unas personas, en cualquier hilo
   await db["messages"].create_index(
     [("user_id", 1), ("integration_id", 1), ("participants", 1), ("internal_date", -1)]
@@ -126,8 +128,10 @@ async def create_indexes(db) -> None:
     # ponytail: contactos anteriores con el mismo teléfono impiden el único; se sigue sin él
     # (ContactService también lo comprueba). Deduplicar a mano y reiniciar para crearlo.
     logfire.warning("Unique contact phone index not created: {error}", error=error)
-  # el $lookup del grafo casa solo por email; sin este índice escanea todo contacts
-  await db["contacts"].create_index("email")
+  # ponytail: el índice suelto por email no lo usaba nadie (el $lookup del grafo filtra con
+  # $expr y $in, que no usan índice; lo acota el de user_id). Quitar cuando haya corrido en producción
+  if "email_1" in await db["contacts"].index_information():
+    await db["contacts"].drop_index("email_1")
   # los dos de arriba son parciales: un find por user_id a secas no puede usarlos y escaneaba
   # la colección entera (conversations_with del asistente, el listado de contactos)
   await db["contacts"].create_index("user_id")
@@ -148,34 +152,6 @@ async def create_indexes(db) -> None:
   await db["invitations"].create_index("email")
   # TTL: Mongo borra las caducadas solo (los repos filtran expires_at igualmente)
   await db["invitations"].create_index("expires_at", expireAfterSeconds=0)
-  await migrate_company_to_organization(db)
-
-
-async def migrate_company_to_organization(db) -> None:
-  """La empresa era del usuario y ahora es de la organización: quien tenía nombre de
-  empresa y aún no está en ninguna pasa a administrar una con sus datos. Idempotente.
-  ponytail: quitar cuando haya corrido en producción."""
-  legacy = {"company_name": {"$type": "string", "$ne": ""}, "organization_id": None}
-  async for doc in db["users"].find(legacy):
-    organization = await MongoOrganizationRepository(db).create(
-      Organization(
-        name=doc["company_name"],
-        company_size=doc.get("company_size"),
-        company_sector=doc.get("company_sector"),
-      )
-    )
-    # el admin del SaaS conserva su rol, como en OrganizationService.create
-    role = Role.ADMIN if doc.get("role") == Role.ADMIN else Role.ORG_ADMIN
-    await db["users"].update_one(
-      {"_id": doc["_id"]}, {"$set": {"organization_id": organization.id, "role": role}}
-    )
-    logfire.info("Migrated company of {email} to organization", email=doc.get("email"))
-  # tamaño o sector sin nombre no dan para una organización: se pierden
-  fields = ("company_name", "company_size", "company_sector")
-  await db["users"].update_many(
-    {"$or": [{f: {"$exists": True}} for f in fields]}, {"$unset": {f: "" for f in fields}}
-  )
-
 
 async def mongo_client(uri: str, db_name: str):
   """Ciclo de vida del cliente: el contenedor lo abre al iniciar y lo cierra al parar."""
@@ -277,9 +253,9 @@ class Container(containers.DeclarativeContainer):
   )
 
   # sin api key no se envía nada; el remitente tiene que ser de un dominio verificado en Resend
-  config.resend_api_key.from_env("RESEND_API_KEY", "")
-  config.resend_from.from_env("RESEND_FROM", "Cunplo <no-reply@cunplo.com>")
-  config.frontend_url.from_env("FRONTEND_REDIRECT", "http://localhost:3000")
+  config.resend_api_key.from_env("RESEND_API_KEY")
+  config.resend_from.from_env("RESEND_FROM")
+  config.frontend_url.from_env("FRONTEND_REDIRECT")
   resend_service = providers.Singleton(
     ResendService,
     api_key=config.resend_api_key,

@@ -71,7 +71,7 @@ A user may have **several accounts per provider**. The unique key is `(user_id, 
 
 `history_id` is the shared name for "how far we have processed": a Gmail `historyId`. A first-ever sync only records the marker (no backfill), an expired marker resyncs to the current one, Gmail watches and reads `INBOX` **and** `SENT` (`gmail.LABELS`), filtering the history by each message's own labels rather than with `labelId`: that parameter filters by thread, so a thread the owner opens never matched `INBOX` until someone replied. On an owner's mail the Gmail job checks `only_contacts` against the recipients (`_counterparts`), and drafts are dropped (Gmail indexes a draft while it is being written and it reappears with a different id once sent).
 
-`gmail_service.disconnect` is the only delete path: it stops the watch and revokes the grant at Google, and tolerates a dead token (log, delete anyway). `DELETE /integrations/{id}` and `DELETE /users/{id}` both go through it — deleting a user must not leave a live grant behind.
+`gmail_service.disconnect` is the only delete path: it stops the watch and revokes the grant at Google, and tolerates a dead token (log, delete anyway). `DELETE /integrations/{id}` and `DELETE /users/{id}` both go through it — deleting a user must not leave a live grant behind. After it, `DELETE /integrations/{id}` calls `task_service.delete_by_integration`, which deletes that account's tasks, messages and attachments (contacts are per user and stay).
 
 ### Organizations
 
@@ -102,7 +102,7 @@ The Gmail job runs **one per mailbox at a time** (`mailbox_lock.py`, a Redis loc
 
 The agent also sees attachments (`AgentEmailMessage.attachments`): every mail lists its filenames, and the images/PDFs (≤10 MB, `READABLE` in `attachment_service.py`) of the **new** mail go as files after the text, so it can tell whether a reply really delivers what was asked. The Gmail job fetches them with `attachment_service.for_agent` *before* the analysis and `store_for_message` reuses the bytes; the context mails get only their filenames (`for_agent_stored`).
 
-**Every mail that passes the `only_contacts` filter is stored**, task or not: it is the context for whatever is said next with those people (with `only_contacts` off this includes newsletters, a known `ponytail:`). Deleting a task deletes **only the task**; messages stay as context.
+**Every mail that passes the `only_contacts` filter is stored**, task or not: it is the context for whatever is said next with those people (with `only_contacts` off this includes newsletters, a known `ponytail:`). Deleting a task deletes **only the task**; messages stay as context. Messages live `RETENTION_DAYS` (90, `message_service.py`) by their `internal_date`: the daily `purge_old_messages` cron at 04:30 deletes older ones with their attachments (tasks stay).
 
 A `thread_id` is only unique **within one mailbox**, so every per-thread key and filter carries `integration_id` alongside `user_id`: the (non-unique, multikey) thread index on `tasks` is `(user_id, integration_id, thread_ids)`, and `messages.list_by_thread_id_user_id` / `list_context` filter on user and account too. Without it two accounts of the same user sharing a `thread_id` would mix their tasks. This mirrors `messages`, whose unique key has always been `(integration_id, provider_id)`. `GET /messages/thread/{integration_id}/{thread_id}` takes the account in the path for the same reason.
 

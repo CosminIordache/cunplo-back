@@ -77,6 +77,17 @@ class MongoMessageRepository:
     recent = [_to_message(d) async for d in cursor.sort("internal_date", -1).limit(limit)]
     return recent[::-1]
 
+  async def ids_by_integration(self, user_id: ObjectId, integration_id: ObjectId) -> list[ObjectId]:
+    cursor = self.collection.find({"user_id": user_id, "integration_id": integration_id}, {"_id": 1})
+    return [d["_id"] async for d in cursor]
+
+  async def ids_older_than(self, internal_date: int) -> dict[ObjectId, list[ObjectId]]:
+    """Agrupados por usuario: los borrados (y sus adjuntos) llevan siempre user_id en el filtro."""
+    grouped: dict[ObjectId, list[ObjectId]] = {}
+    async for d in self.collection.find({"internal_date": {"$lt": internal_date}}, {"user_id": 1}):
+      grouped.setdefault(d["user_id"], []).append(d["_id"])
+    return grouped
+
   async def delete(self, message_id: ObjectId, user_id: ObjectId) -> bool:
     result = await self.collection.delete_one({"_id": message_id, "user_id": user_id})
     return result.deleted_count == 1
