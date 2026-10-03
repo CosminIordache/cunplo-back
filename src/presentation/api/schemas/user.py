@@ -4,7 +4,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr
 from pydantic_extra_types.timezone_name import TimeZoneName
 from pydantic_extra_types.language_code import LanguageAlpha2
 from pydantic_extra_types.phone_numbers import PhoneNumberValidator
-from src.domain.user import CompanySector, CompanySize, ContactsFilter, Role
+from src.domain.user import CompanySector, CompanySize, Role
 
 Phone = Annotated[str, PhoneNumberValidator(number_format="E164")]
 
@@ -17,7 +17,7 @@ class UserUpdate(BaseModel):
   timezone: Optional[TimeZoneName] = None
   language: Optional[LanguageAlpha2] = None
   task_language: Optional[LanguageAlpha2] = None
-  only_contacts: Optional[ContactsFilter] = None
+  only_contacts: Optional[bool] = None
   onboarded: Optional[bool] = None
   company_name: Optional[str] = None
   company_size: Optional[CompanySize] = None
@@ -35,7 +35,7 @@ class UserOut(BaseModel):
   timezone: str
   language: str
   task_language: str = "en"
-  only_contacts: ContactsFilter = ContactsFilter.NONE
+  only_contacts: bool = False
   onboarded: bool = False
   company_name: Optional[str] = None
   company_size: Optional[CompanySize] = None

@@ -15,10 +15,6 @@ MODEL = "gpt-live-transcribe"
 SAMPLE_RATE = 24000
 # ponytail: precio a mano. openai no expone precios y genai-prices no conoce el modelo
 PRICE_PER_MINUTE = Decimal("0.017")
-# transcripción de un archivo entero (notas de voz de WhatsApp), no en directo
-FILE_MODEL = "gpt-transcribe"
-# ponytail: precio a mano, como el del directo
-FILE_PRICE_PER_MINUTE = Decimal("0.0045")
 
 
 class TranscriptionService:
@@ -97,32 +93,3 @@ class TranscriptionService:
             price_per_minute=PRICE_PER_MINUTE,
           )
 
-  async def audio_transcription(
-    self, audio: bytes, filename: str, user_id: ObjectId, email: str
-  ) -> str:
-    """Un audio completo (ogg, mp3, m4a, wav...) a texto. filename solo sirve para que
-    OpenAI deduzca el formato por la extensión."""
-    # las notas de voz de WhatsApp llegan como .oga (Ogg/Opus), que OpenAI rechaza por extensión
-    if filename.endswith(".oga"):
-      filename = filename[:-4] + ".ogg"
-    result = await self.client.audio.transcriptions.create(model=FILE_MODEL, file=(filename, audio))
-    # el usage llega en tokens o en segundos según facture el modelo, como en stream
-    usage = result.usage
-    seconds = usage.seconds if usage is not None and usage.type == "duration" else 0.0
-    input_tokens = usage.input_tokens if usage is not None and usage.type == "tokens" else 0
-    output_tokens = usage.output_tokens if usage is not None and usage.type == "tokens" else 0
-    logfire.info(
-      "Audio transcription for {email} used {seconds}s / {input_tokens} tokens",
-      email=email, seconds=seconds, input_tokens=input_tokens,
-    )
-    if seconds or input_tokens:
-      await self.usage_service.record_transcription(
-        user_id=user_id,
-        email=email,
-        model=FILE_MODEL,
-        seconds=seconds,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        price_per_minute=FILE_PRICE_PER_MINUTE,
-      )
-    return result.text

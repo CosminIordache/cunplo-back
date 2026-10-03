@@ -18,8 +18,6 @@ from src.application.use_cases.subscription_service import SubscriptionService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.usage_service import UsageService
 from src.application.use_cases.user_service import UserService
-from src.application.use_cases.whatsapp_agent_service import WhatsAppAgentService
-from src.application.use_cases.whatsapp_service import WhatsAppService
 from src.infrastructure.driven.mongo.mongo_attachment_repository import MongoAttachmentRepository
 from src.infrastructure.driven.mongo.mongo_contact_repository import MongoContactRepository
 from src.infrastructure.driven.mongo.mongo_graph_repository import MongoGraphRepository
@@ -56,15 +54,6 @@ async def create_indexes(db) -> None:
   )
   # el webhook de Gmail busca por email; no es único, la misma cuenta vale para varios usuarios
   await db["integrations"].create_index([("provider", 1), ("email", 1)])
-  # ponytail: las filas de WhatsApp anteriores guardaban el número en 'email'; se mueve a
-  # 'phone' en cada arranque (idempotente). Quitar cuando no quede ninguna sin migrar.
-  await db["integrations"].update_many(
-    {"provider": "whatsapp", "phone": {"$exists": False}}, {"$rename": {"email": "phone"}}
-  )
-  # el webhook de WhatsApp busca por número si no trae session_id
-  await db["integrations"].create_index([("provider", 1), ("phone", 1)])
-  # el webhook de WhatsApp solo trae el device_id de GOWA, que es nuestro account_id
-  await db["integrations"].create_index([("provider", 1), ("account_id", 1)])
   # ponytail: Outlook/Microsoft se quitó; limpia sus restos en cada arranque (idempotente).
   # Quitar cuando haya corrido en producción. Sin el $unset, Integration(**doc) revienta.
   await db["integrations"].delete_many({"provider": "microsoft"})
@@ -109,7 +98,7 @@ async def create_indexes(db) -> None:
   # el asistente responde "qué he hablado con X" por las tareas en las que X participa
   await db["tasks"].create_index([("user_id", 1), ("contact_ids", 1)])
   # un contacto por usuario y email: el mismo email puede ser cliente de dos usuarios.
-  # Parcial: los contactos de WhatsApp no tienen email y varios null chocarían en un único.
+  # Parcial: un contacto puede no tener email y varios null chocarían en un único.
   # Mongo no cambia opciones de un índice existente: el viejo (no parcial) se borra antes
   email_key = [("user_id", 1), ("email", 1)]
   old_email_index = (await db["contacts"].index_information()).get("user_id_1_email_1")
@@ -118,7 +107,7 @@ async def create_indexes(db) -> None:
   await db["contacts"].create_index(
     email_key, unique=True, partialFilterExpression={"email": {"$type": "string"}}
   )
-  # lo mismo por teléfono: WhatsApp busca el contacto por número (E.164)
+  # lo mismo por teléfono (E.164), para los contactos sin email
   try:
     await db["contacts"].create_index(
       [("user_id", 1), ("phone", 1)],
@@ -177,7 +166,6 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
-      "src.infrastructure.driving.whatsapp_webhook",
     ]
   )
 
@@ -248,7 +236,6 @@ class Container(containers.DeclarativeContainer):
   usage_service = providers.Factory(UsageService, repository=usage_repository)
 
   agent_service = providers.Factory(AgentService, usage_service=usage_service)
-  whatsapp_agent_service = providers.Factory(WhatsAppAgentService, usage_service=usage_service)
   # Singleton: montar el Agent (esquemas de tools, cliente de OpenAI) costaba ~40% de CPU por pregunta
   assistant_service = providers.Singleton(AssistantService, db=db, usage_service=usage_service)
   transcription_service = providers.Factory(TranscriptionService, usage_service=usage_service)
@@ -259,14 +246,4 @@ class Container(containers.DeclarativeContainer):
     repository=integration_repository,
     integrations=integration_service,
     topic=config.pubsub_topic,
-  )
-
-  # el webhook se registra en cada device de GOWA al crearlo
-  config.whatsapp_webhook_url.from_env("WHATSAPP_WEBHOOK_URL", "")
-  config.gowa_webhook_secret.from_env("GOWA_WEBHOOK_SECRET", "")
-  whatsapp_service = providers.Factory(
-    WhatsAppService,
-    repository=integration_repository,
-    webhook_url=config.whatsapp_webhook_url,
-    secret=config.gowa_webhook_secret,
   )

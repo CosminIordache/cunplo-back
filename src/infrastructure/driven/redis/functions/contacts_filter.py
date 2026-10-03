@@ -1,4 +1,3 @@
-import re
 from email.utils import parseaddr
 
 import logfire
@@ -12,13 +11,8 @@ from src.domain.contact import Contact
 
 
 async def is_known_contact(ctx, user_id, sender: str) -> bool:
-  """El remitente ('Nombre <a@b.com>', 'a@b.com' o 'Nombre <+34600…>' en WhatsApp) ya
-  es contacto del usuario. La comparten los jobs: el filtro only_contacts es el mismo."""
+  """El remitente ('Nombre <a@b.com>' o 'a@b.com') ya es contacto del usuario."""
   # ponytail: solo mira el remitente, no To/Cc; amplía si hace falta filtrar por destinatario
-  # WhatsApp primero: su nombre es texto libre ("Juan, el fontanero") y parseaddr, que es
-  # de cabeceras de email, se rompe con comas o '<>' y perdía el número
-  if phone := re.search(r"(\+\d+)>?$", sender.strip()):
-    return bool(await ctx["contact_service"].get_by_phone(user_id, phone.group(1)))
   address = parseaddr(sender)[1]
   return bool(address) and bool(await ctx["contact_service"].get_by_email(user_id, address))
 
@@ -31,8 +25,7 @@ async def _find(ctx, user_id, email, phone):
 
 async def resolve_contacts(ctx, user_id, own_address: str, extracted_contacts) -> list:
   """Los contactos del agente a ids: crea los que no existen todavía. Se buscan por
-  email y, si no traen (WhatsApp), por teléfono. own_address es el email o el número
-  del dueño de la cuenta."""
+  email y, si no traen, por teléfono. own_address es el email del dueño de la cuenta."""
   own = own_address.lower()
   contact_ids = []
   for extracted in extracted_contacts:
@@ -60,7 +53,7 @@ async def _create(ctx, contact: Contact):
     return await _find(ctx, contact.user_id, contact.email, None)
   except ContactPhoneAlreadyUsed:
     if not contact.email:
-      return await _find(ctx, contact.user_id, None, contact.phone)  # misma carrera, en WhatsApp
+      return await _find(ctx, contact.user_id, None, contact.phone)  # misma carrera, contacto sin email
     # el teléfono ya es de otro contacto (una centralita): este se crea sin él
     contact.phone = None
     return await _create(ctx, contact)

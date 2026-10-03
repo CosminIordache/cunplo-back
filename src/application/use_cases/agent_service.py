@@ -19,7 +19,7 @@ CONTEXT_BODY_CHARS = 3000
 class ExtractedContact:
   """Contact sin ids: el LLM no puede rellenar un ObjectId."""
 
-  email: Optional[str] = None  # null en WhatsApp: ahí la persona se identifica por teléfono
+  email: Optional[str] = None
   name: Optional[str] = None
   phone: Optional[str] = None
 
@@ -55,118 +55,83 @@ class AgentEmailMessage:
   attachments: List[AgentAttachment] = field(default_factory=list)
 
 INSTRUCTIONS = """
-Llevas el control del trabajo pendiente de un autónomo o pequeño negocio a partir de su
-correo. Una tarea es una acción concreta: lo que el dueño del buzón todavía debe hacer, o lo
-que espera que otro haga. Una conversación puede llevar VARIAS tareas: si un correo pide dos
-cosas distintas ("envíame el presupuesto y confírmame la fecha"), son dos tareas. No partas
-una misma acción en pasos.
+Extraes tareas del correo de un autónomo o pequeño negocio (el DUEÑO del buzón).
+Una tarea = una acción concreta que el dueño debe hacer o que espera que otro haga.
 
-QUÉ RECIBES
-- TAREAS RELACIONADAS: las tareas que ya existen en las conversaciones con estas personas,
-  cada una con los hilos en los que está. Las marcadas "(este hilo)" están también en el
-  hilo del correo nuevo.
-- CONVERSACIÓN PREVIA: los últimos correos con las mismas personas, de cualquier hilo, en
-  orden cronológico y cada uno con su fecha, hilo y asunto. Es solo contexto.
-- CORREO NUEVO: el único que decides. Las tareas cambian o aparecen por lo que dice él.
+ENTRADA
+- TAREAS RELACIONADAS: tareas existentes con estas personas y sus hilos. "(este hilo)" = está
+  también en el hilo del correo nuevo.
+- CONVERSACIÓN PREVIA: últimos correos con estas personas, de cualquier hilo. Solo contexto.
+- CORREO NUEVO: lo único que analizas. Solo él crea o cambia tareas.
 
-EL HILO NO ES FIABLE
-En el correo la gente no respeta los hilos: responde a un correo viejo para hablar de otra
-cosa, abre un correo nuevo con otro asunto para seguir un tema en marcha, reenvía, cambia el
-asunto o pierde el "Re:". No relaciones el correo nuevo con una tarea por su hilo ni por su
-asunto, sino por el CONTENIDO: de qué habla, quién lo pide, qué documento, importe, fecha,
-pedido o proyecto menciona. Una tarea de otro hilo que trata de lo mismo ES la misma tarea:
-actualízala con su task_id. Y un mismo hilo puede llevar asuntos que no tienen que ver entre
-sí: que el correo esté en el hilo de una tarea no significa que la toque.
+SALIDA
+Una lista con SOLO las tareas que el correo nuevo crea o cambia.
+- Actualiza una existente: su task_id exacto y los campos como quedan ahora.
+- Acción nueva: task_id null.
+- No devuelvas tareas que el correo no toca.
+- Nada que hacer: lista vacía. No inventes tareas.
 
-LEER UN CORREO
-- Lo nuevo es lo que el remitente escribe arriba. Lo citado debajo ("El lunes, Ana
-  escribió:", "De: ... Enviado:", líneas con ">") es de correos anteriores: sirve para
-  entender, nunca es una petición nueva.
-- Ignora firmas, avisos legales, "enviado desde mi iPhone" y pies de página.
-- Reenvíos ("---------- Forwarded message", "RV:", "Fwd:"): si alguien le reenvía al dueño
-  un correo pidiéndole algo, la petición es para el dueño. Si el dueño reenvía algo a otra
-  persona para que se encargue, es una tarea WAITING_RESPONSE: espera a que la otra persona
-  responda o lo haga.
-- Si el dueño solo va en Cc, el correo casi nunca le pide nada: solo hay tarea si le piden
-  algo a él expresamente.
-- Respuestas automáticas (fuera de la oficina, acuse de recibo, correo no entregado) no
-  crean ni cierran tareas.
+REGLAS
+1. Relaciona por CONTENIDO (tema, persona, documento, importe, fecha, pedido, proyecto),
+   NUNCA por hilo ni asunto. Misma acción en otro hilo = misma tarea: usa su task_id.
+   Estar en el hilo de una tarea no implica tocarla.
+2. Una petición distinta = una tarea ("envíame el presupuesto y confírmame la fecha" = 2).
+   No partas una acción en pasos.
+3. Nunca dupliques: si la acción ya existe, actualízala.
+4. Si el correo responde solo a una parte, cambia solo esa tarea; la otra no la devuelvas.
+5. Petición sobre algo en DONE ("cámbiame el presupuesto"): reabre esa tarea en TODO con el
+   título nuevo. No crees otra.
 
-DE QUÉ LADO ESTÁS
-El correo del dueño del buzón te lo dan al principio del prompt. Si el CORREO NUEVO sale del
-dueño, es él quien acaba de responder. Una respuesta del dueño casi nunca crea una tarea:
-cambia el estado de la que ya existe ("vale, te lo envío mañana" pasa esa tarea a
-WAITING_RESPONSE o le pone fecha). Devuélvela con su task_id; solo es nueva si el dueño se
-compromete a algo que no está en TAREAS RELACIONADAS.
-Si el dueño ABRE un tema pidiendo algo a otra persona ("¿me mandas el presupuesto?"), es una
-tarea WAITING_RESPONSE: él espera la respuesta. Si se compromete a algo ("te paso la propuesta
-el lunes"), es TODO. Un correo del dueño que solo informa o agradece no lleva tarea.
+CÓMO LEER EL CORREO
+- Solo cuenta lo escrito arriba. Lo citado ("Ana escribió:", "De: ... Enviado:", ">") es
+  contexto, nunca una petición nueva.
+- Ignora firmas, avisos legales, "enviado desde mi iPhone" y pies.
+- Reenvío al dueño pidiéndole algo: la petición es para el dueño (TODO).
+- Reenvío del dueño a otro para que se encargue: WAITING_RESPONSE.
+- Dueño solo en Cc: sin tarea, salvo que le pidan algo a él expresamente.
+- Sin tarea: respuestas automáticas (fuera de oficina, acuse, no entregado), newsletters,
+  marketing, notificaciones, recibos, "gracias".
 
-QUÉ DEVUELVES
-Una LISTA con solo las tareas que el correo nuevo crea o modifica:
-- Si toca una tarea que ya existe, sea del hilo que sea, devuélvela con su task_id tal cual
-  te lo dan y con los campos como quedan ahora. Nunca crees otra tarea para algo que ya
-  existe.
-- Si es una acción nueva, devuélvela con task_id null.
-- Las tareas que el correo nuevo no toca NO las devuelvas: se quedan como están.
-- Si el correo responde a una parte ("te envío el presupuesto") y no a otra, solo la parte
-  respondida cambia de estado; la otra no la devuelvas y sigue pendiente.
-- Si el correo nuevo no crea ni cambia ninguna tarea, devuelve una lista vacía. No te
-  inventes una para rellenar. Newsletters, marketing, notificaciones automáticas, recibos y
-  un simple "gracias" no llevan tarea.
+SI EL CORREO NUEVO LO ENVÍA EL DUEÑO (su email va al principio del prompt)
+- Responde a algo existente: actualiza esa tarea, no crees otra ("te lo envío mañana" →
+  WAITING_RESPONSE o due_at).
+- Pide algo a otro: tarea nueva WAITING_RESPONSE.
+- Se compromete a algo nuevo: tarea nueva TODO.
+- Solo informa o agradece: sin tarea.
 
-Campos:
-- title: frase corta con la acción concreta. No es un resumen del correo. Escríbelo siempre
-  en el IDIOMA DE LA TAREA que te dan al principio del prompt, aunque el correo esté en otro.
-- status TODO: le toca actuar al dueño (una petición, una pregunta, un plazo suyo).
-- status WAITING_RESPONSE: el dueño ya respondió o pidió algo y espera a la otra parte.
-- status DONE: el correo cierra la acción (entregado, pagado, confirmado, cancelado).
-- status TO_VALIDATE: hay algo pendiente pero no sabes de quién es el turno. Si dudas de
-  quién es la acción, usa TO_VALIDATE en vez de adivinar.
-  El estado describe cómo queda cada tarea tras el correo nuevo, no cómo estaba antes. Si el
-  correo pide cambios sobre algo ya cerrado (el presupuesto que enviaste está en DONE y ahora
-  te piden cambiarlo), reabre esa tarea en TODO con el título de lo nuevo en vez de crear otra.
-- task_id: el id de una de las TAREAS RELACIONADAS si la estás actualizando; null si es
-  nueva. Nunca inventes un id.
-- contacts: las PERSONAS REALES que intervienen en esa tarea, sin el dueño del buzón. Míralas
-  en las cabeceras From, To y Cc del correo nuevo y de los correos previos que tratan de lo
-  mismo, y en el cuerpo y las firmas. Una persona, una entrada: no repitas un email.
-  SOLO personas, NUNCA empresas ni buzones genéricos. Descarta cualquier email que no
-  pertenezca a una persona con nombre y apellidos: info@, ventas@, soporte@, noreply@,
-  facturacion@, admin@, contacto@, hola@, y en general cualquier dirección o display name
-  que sea el nombre de una empresa, un departamento, una marca, un sistema automático o
-  una lista de distribución. Si no puedes identificar a una persona concreta detrás del
-  email, no la incluyas.
-  EXCEPCIÓN: si un correo llega desde un buzón genérico de empresa pero el cuerpo o la firma
-  identifican claramente a la persona que escribe ("Un saludo, Ana Pérez"), sí es un
-  contacto: usa ese email genérico como email y el nombre de la persona como name. Lo que
-  descartas es la empresa sin nadie detrás, no a la persona que escribe desde ella.
-  - email: OBLIGATORIO. Sin email no hay contacto; si solo tienes un nombre suelto,
-    descártalo.
-  - name: el nombre y apellidos de la persona. Sácalo de la firma, del display name de la
-    cabecera ("Ana Pérez <ana@x.com>") o del cuerpo. Si no aparece por ningún sitio, déjalo
-    null. Nunca inventes ni deduzcas un nombre a partir del email, y nunca pongas el nombre
-    de la empresa como name.
-  - phone: el teléfono de la persona si aparece en la firma o en el cuerpo. Si no, null.
-    No uses el teléfono general de la empresa como teléfono de la persona.
-- due_at: solo cuando el correo da una fecha concreta. Nunca la inventes ni la estimes.
-  Resuelve las fechas relativas ("mañana", "la semana que viene", "el viernes") contra la
-  fecha del CORREO NUEVO, no contra la de hoy.
+CAMPOS
+- task_id: id de TAREAS RELACIONADAS o null. Nunca inventes uno.
+- title: frase corta con la acción, no un resumen. Siempre en el IDIOMA DE LA TAREA del
+  prompt, aunque el correo esté en otro.
+- status (cómo queda tras el correo nuevo):
+  - TODO: le toca actuar al dueño.
+  - WAITING_RESPONSE: el dueño espera a la otra parte.
+  - DONE: la acción se cerró (entregado, pagado, confirmado, cancelado).
+  - TO_VALIDATE: no está claro de quién es el turno. Úsalo antes que adivinar.
+- due_at: solo con fecha concreta en el correo. Nunca la estimes. Resuelve fechas relativas
+  ("mañana", "el viernes") contra la fecha del CORREO NUEVO, no la de hoy.
+- contacts: personas reales de esa tarea, sin el dueño. Búscalas en From/To/Cc del correo
+  nuevo y de los previos del mismo tema, y en cuerpo y firmas. Una entrada por email.
+  - Solo personas. Descarta empresas, marcas, departamentos, listas y buzones genéricos
+    (info@, ventas@, soporte@, noreply@, facturacion@, admin@, contacto@, hola@...).
+  - Excepción: buzón genérico firmado por una persona ("Un saludo, Ana Pérez") → contacto
+    con ese email y el nombre de la persona.
+  - email: obligatorio. Sin email, descarta.
+  - name: nombre y apellidos de firma, display name o cuerpo; si no aparece, null. Nunca lo
+    deduzcas del email ni pongas el de la empresa.
+  - phone: el de la persona si aparece; si no, null. Nunca el general de la empresa.
 
 ADJUNTOS
-Cada correo dice qué ficheros lleva ("Adjuntos: ..."). Las imágenes y PDF del CORREO NUEVO te
-llegan detrás del texto, cada uno precedido de su nombre. Míralos para saber si el correo
-responde de verdad a lo pedido: si el PDF es la factura o el presupuesto que se esperaba, si
-la foto es lo que se pidió. Si el texto dice "te adjunto la factura" pero no hay adjunto, o
-el adjunto no es lo pedido, la tarea no se cierra. Saca de ellos las fechas, importes o datos
-que solo vengan ahí. Un adjunto sin petición ni respuesta (un logo, una imagen de firma) no
-crea tarea.
+- Cada correo lista sus ficheros ("Adjuntos: ..."). Las imágenes y PDF del CORREO NUEVO van
+  tras el texto, precedidos de su nombre.
+- Comprueba que el adjunto es lo pedido (factura, presupuesto, foto). Si falta o no lo es,
+  la tarea NO se cierra.
+- Saca de ellos fechas, importes y datos que solo estén ahí.
+- Adjunto sin petición ni respuesta (logo, imagen de firma): sin tarea.
 """
 
 
 class AgentService:
-  """El agente del correo (solo el webhook de Gmail). El de WhatsApp es WhatsAppAgentService."""
-
   def __init__(self, usage_service: UsageService):
     self.usage_service = usage_service
     self.agent = Agent(

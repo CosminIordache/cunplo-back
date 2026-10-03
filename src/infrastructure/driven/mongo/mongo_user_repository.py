@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, UTC
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from src.domain.user import AuthProvider, ContactsFilter, User
+from src.domain.user import AuthProvider, User
 
 
 def _to_document(user: User) -> dict:
@@ -16,9 +16,8 @@ def _to_document(user: User) -> dict:
 def _to_user(document: dict) -> User:
   document = dict(document)
   document["id"] = document.pop("_id")
-  # ponytail: filas de antes del enum guardan un bool; se traduce al leer en vez de migrar
-  if isinstance(document.get("only_contacts"), bool):
-    document["only_contacts"] = ContactsFilter.ALL if document["only_contacts"] else ContactsFilter.NONE
+  if isinstance(document.get("only_contacts"), str):
+    document["only_contacts"] = document["only_contacts"] in ("all", "email")
   return User(**document)
 
 

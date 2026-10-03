@@ -9,8 +9,6 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 # From/To/Cc normal; los nombres entre comillas con '@' dentro darían un falso
 # positivo, que al no existir en contacts se descarta solo
 EMAIL = r"[\w.!#$%&'*+/=?^_`{|}~-]+@[\w-]+(?:\.[\w-]+)+"
-# Los de WhatsApp: el mensaje guarda los números en E.164 (jid_to_phone)
-PHONE = r"\+\d{7,15}"
 
 
 class MongoGraphRepository:
@@ -61,7 +59,7 @@ class MongoGraphRepository:
                   {"$ifNull": ["$to", ""]}, " ",
                   {"$ifNull": ["$cc", ""]},
                 ]},
-                "regex": f"{EMAIL}|{PHONE}",
+                "regex": EMAIL,
               }},
               # los contactos se guardan siempre en minúsculas
               "as": "m", "in": {"$toLower": "$$m.match"},
@@ -74,14 +72,11 @@ class MongoGraphRepository:
             # el dueño del buzón y los que nunca llegaron a contacto no salen:
             # el $lookup solo casa con lo que existe en contacts. Nada de
             # localField: con un array vacío Mongo lo trata como null y casaba
-            # con todos los contactos sin email, o sea, todos los de WhatsApp
+            # con todos los contactos sin email
             "pipeline": [
               {"$match": {"$expr": {"$and": [
                 {"$eq": ["$user_id", user_id]},
-                {"$or": [
-                  {"$in": ["$email", "$$addresses"]},
-                  {"$in": ["$phone", "$$addresses"]},
-                ]},
+                {"$in": ["$email", "$$addresses"]},
               ]}}},
               {"$project": {"email": 1, "name": 1, "phone": 1}},
             ],

@@ -9,9 +9,9 @@ from src.domain.message import Message
 from src.application.ports.attachment_repository import AttachmentRepository
 from src.application.ports.storage import Storage
 from src.application.use_cases.integration_service import ReauthRequired
-from src.domain.integration import Integration, Provider
+from src.domain.integration import Integration
 from src.application.use_cases.integration_service import IntegrationService
-from src.infrastructure.external_services import gmail, gowa
+from src.infrastructure.external_services import gmail
 
 
 # lo que el modelo puede leer; el resto le llega solo por nombre
@@ -46,33 +46,29 @@ class AttachmentService:
   async def _bytes(
     self, integration: Integration, token: str, provider_id: str, attachment: dict
   ) -> bytes:
-    """Gmail obliga a una llamada por fichero; WhatsApp lo tiene ya descargado en GOWA.
+    """Gmail obliga a una llamada por fichero.
     Si for_agent ya los bajó, se reutilizan."""
     if data := attachment.get("data"):
       return data
-    if integration.provider == Provider.WHATSAPP:
-      return await gowa.media(attachment["path"])
     return await gmail.get_attachment(token, provider_id, attachment["attachment_id"])
 
   async def _resolve(
     self, integration: Integration, provider_id: str, raw_message: dict
   ) -> tuple[str, list[dict]]:
-    """El token y la lista de adjuntos del mensaje (Gmail y GOWA los traen en el propio mensaje)."""
+    """El token y la lista de adjuntos del mensaje (Gmail los trae en el propio mensaje)."""
     attachments = raw_message.get("attachments") or []
     if not attachments:
       return "", []
 
-    token = ""  # GOWA no usa tokens: su Basic Auth la pone gowa.py
-    if integration.provider != Provider.WHATSAPP:
-      try:
-        token = await self.integrations.access_token_for(integration)
-      except ReauthRequired:
-        logfire.warning(
-          "No token for {email}: attachments of {provider_id} not fetched",
-          email=integration.email,
-          provider_id=provider_id,
-        )
-        return "", []
+    try:
+      token = await self.integrations.access_token_for(integration)
+    except ReauthRequired:
+      logfire.warning(
+        "No token for {email}: attachments of {provider_id} not fetched",
+        email=integration.email,
+        provider_id=provider_id,
+      )
+      return "", []
     return token, attachments
 
   async def for_agent(
@@ -106,26 +102,15 @@ class AttachmentService:
     return result
 
   async def for_agent_stored(
-    self, user_id: ObjectId, message_ids: list[ObjectId], with_data: bool = False
+    self, user_id: ObjectId, message_ids: list[ObjectId]
   ) -> dict[ObjectId, list[AgentAttachment]]:
-    """Los adjuntos ya guardados de un lote de mensajes, para el agente. Sin with_data
-    (el hilo previo) solo el nombre; con él (la ráfaga de WhatsApp) también el contenido
-    de los legibles, leído del bucket."""
+    """Los adjuntos ya guardados de un lote de mensajes (el contexto), para el agente:
+    solo el nombre, el contenido va únicamente con el correo nuevo."""
     grouped: dict[ObjectId, list[AgentAttachment]] = {}
     for message_id, attachments in (await self.by_message_id(user_id, message_ids)).items():
       for attachment in attachments:
-        data = None
-        if with_data and _readable(attachment.mime_type, attachment.size):
-          try:
-            data = await self.storage.get(attachment.storage_key)
-          except Exception as error:
-            logfire.warning(
-              "Could not read attachment {key} for the agent: {error}",
-              key=attachment.storage_key,
-              error=str(error),
-            )
         grouped.setdefault(message_id, []).append(
-          AgentAttachment(filename=attachment.filename, mime_type=attachment.mime_type, data=data)
+          AgentAttachment(filename=attachment.filename, mime_type=attachment.mime_type)
         )
     return grouped
 
@@ -152,7 +137,7 @@ class AttachmentService:
               attachment_id=attachment["attachment_id"],
               filename=attachment["filename"],
               mime_type=attachment["mime_type"],
-              size=attachment.get("size") or len(data),  # GOWA no manda el tamaño
+              size=attachment.get("size") or len(data),
               storage_key=key,
             )
           )

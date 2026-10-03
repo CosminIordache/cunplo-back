@@ -9,7 +9,7 @@ from bson import ObjectId
 class Contact:
 
   user_id: ObjectId
-  # al menos uno de los dos: el correo identifica por email, WhatsApp solo por teléfono
+  # al menos uno de los dos: sin email, el contacto se identifica por teléfono
   email: Optional[str] = None
   name: Optional[str] = None
   phone: Optional[str] = None  # E.164 ("+34600112233"), el formato que compara get_by_phone

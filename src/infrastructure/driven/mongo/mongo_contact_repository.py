@@ -39,7 +39,7 @@ class MongoContactRepository:
     return _to_contact(doc) if doc else None
 
   async def get_by_phone(self, user_id: ObjectId, phone: str) -> Optional[Contact]:
-    """El equivalente de get_by_email para WhatsApp, donde no hay email."""
+    """El equivalente de get_by_email para los contactos sin email."""
     doc = await self.collection.find_one({"user_id": user_id, "phone": phone})
     return _to_contact(doc) if doc else None
 

@@ -11,7 +11,6 @@ from src.infrastructure.driven.redis.functions.mailbox_lock import mailbox_lock
 from src.infrastructure.external_services.gmail import GmailRateLimited
 from src.domain.integration import Provider
 from src.domain.message import Message
-from src.domain.user import ContactsFilter
 from src.domain.task import Task
 from src.application.use_cases.task_service import existing_task
 
@@ -110,7 +109,7 @@ async def _process_messages(ctx, messages, email, user_id, integration) -> None:
     return
 
   user = await ctx["user_service"].get(user_id)
-  only_contacts = bool(user and user.only_contacts in (ContactsFilter.ALL, ContactsFilter.EMAIL))
+  only_contacts = bool(user and user.only_contacts)
 
   for message in messages:
     thread_id = message["thread_id"]

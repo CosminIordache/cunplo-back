@@ -13,7 +13,7 @@ class ContactCreate(BaseModel):
 
   @model_validator(mode="after")
   def _email_or_phone(self):
-    # un contacto de WhatsApp no tiene email, pero sin ninguno de los dos no hay a quién buscar
+    # el email es opcional, pero sin ninguno de los dos no hay a quién buscar
     if not (self.email or self.phone):
       raise ValueError("email or phone is required")
     return self
