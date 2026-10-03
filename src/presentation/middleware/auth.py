@@ -45,6 +45,26 @@ async def get_admin_user(user: CurrentUser) -> User:
 AdminUser = Annotated[User, Depends(get_admin_user)]
 
 
+async def get_org_id(user: CurrentUser) -> ObjectId:
+  """La organización del usuario de la cookie; 403 si no tiene."""
+  if not user.organization_id:
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "not in an organization")
+  return user.organization_id
+
+
+OrgId = Annotated[ObjectId, Depends(get_org_id)]
+
+
+async def get_admin_org_id(user: CurrentUser, organization_id: OrgId) -> ObjectId:
+  # el admin del SaaS administra la organización a la que pertenece
+  if user.role not in (Role.ORG_ADMIN, Role.ADMIN):
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "only organization admins")
+  return organization_id
+
+
+AdminOrgId = Annotated[ObjectId, Depends(get_admin_org_id)]
+
+
 @inject
 async def require_active_subscription(
   user: CurrentUser,

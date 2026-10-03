@@ -14,23 +14,8 @@ class AuthProvider(StrEnum):
 
 class Role(StrEnum):
   USER = "user"
-  ADMIN = "admin"
-
-class CompanySize(StrEnum):
-  S1_10 = "1-10"
-  S11_50 = "11-50"
-  S51_200 = "51-200"
-  S201_PLUS = "201+"
-
-class CompanySector(StrEnum):
-  REAL_ESTATE = "real_estate"
-  AGENCY_MARKETING = "agency_marketing"
-  CONSULTING = "consulting"
-  LEGAL = "legal"
-  SOFTWARE_SAAS = "software_saas"
-  RETAIL = "retail"
-  HEALTH = "health"
-  OTHER = "other"
+  ORG_ADMIN = "org_admin"  # administra su organización
+  ADMIN = "admin"  # administrador del SaaS
 
 @dataclass
 class User:
@@ -40,10 +25,6 @@ class User:
   phone: Optional[str]
   timezone: TimeZoneName
   language: LanguageAlpha2
-
-  company_name: Optional[str] = None
-  company_size: Optional[CompanySize] = None
-  company_sector: Optional[CompanySector] = None
 
   # ponytail: URL del proveedor, no la copiamos a storage propio.
   picture: Optional[str] = None
@@ -58,6 +39,9 @@ class User:
   onboarded: bool = False
 
   role: Role = Role.USER
+
+  # como mucho una organización; el rol dentro de ella es `role`
+  organization_id: Optional[ObjectId] = None
 
   # con quién entra: el 'sub' es la identidad, el email puede cambiar o repetirse
   auth_provider: Optional[AuthProvider] = None

@@ -14,6 +14,8 @@ from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.graph_service import GraphService
 from src.application.use_cases.integration_service import IntegrationService
 from src.application.use_cases.message_service import MessageService
+from src.application.use_cases.organization_service import OrganizationService
+from src.application.use_cases.resend_service import ResendService
 from src.application.use_cases.subscription_service import SubscriptionService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.usage_service import UsageService
@@ -23,11 +25,17 @@ from src.infrastructure.driven.mongo.mongo_contact_repository import MongoContac
 from src.infrastructure.driven.mongo.mongo_graph_repository import MongoGraphRepository
 from src.infrastructure.driven.mongo.mongo_integration_repository import MongoIntegrationRepository
 from src.infrastructure.driven.mongo.mongo_message_repository import MongoMessageRepository, participants
+from src.infrastructure.driven.mongo.mongo_organization_repository import (
+  MongoInvitationRepository,
+  MongoOrganizationRepository,
+)
 from src.infrastructure.driven.mongo.mongo_subscription_repository import MongoSubscriptionRepository
 from src.infrastructure.driven.mongo.mongo_task_repository import MongoTaskRepository
 from src.infrastructure.driven.mongo.mongo_usage_repository import MongoUsageRepository
 from src.infrastructure.driven.mongo.mongo_user_repository import MongoUserRepository
 from src.infrastructure.driven.redis.worker import redis_pool
+from src.domain.organization import Organization
+from src.domain.user import Role
 from src.infrastructure.driven.s3.storage import S3Storage
 from src.infrastructure.external_services.oauth_refresh import refresh_token
 
@@ -132,6 +140,41 @@ async def create_indexes(db) -> None:
   await db["subscriptions"].create_index("user_id", unique=True)
   # el gasto se suma por usuario, normalmente acotado a un periodo
   await db["usages"].create_index([("user_id", 1), ("created_at", -1)])
+  # los miembros de una organización
+  await db["users"].create_index("organization_id")
+  # una invitación por organización y email: reinvitar la sustituye
+  await db["invitations"].create_index([("organization_id", 1), ("email", 1)], unique=True)
+  # las que ha recibido un usuario, por su email
+  await db["invitations"].create_index("email")
+  # TTL: Mongo borra las caducadas solo (los repos filtran expires_at igualmente)
+  await db["invitations"].create_index("expires_at", expireAfterSeconds=0)
+  await migrate_company_to_organization(db)
+
+
+async def migrate_company_to_organization(db) -> None:
+  """La empresa era del usuario y ahora es de la organización: quien tenía nombre de
+  empresa y aún no está en ninguna pasa a administrar una con sus datos. Idempotente.
+  ponytail: quitar cuando haya corrido en producción."""
+  legacy = {"company_name": {"$type": "string", "$ne": ""}, "organization_id": None}
+  async for doc in db["users"].find(legacy):
+    organization = await MongoOrganizationRepository(db).create(
+      Organization(
+        name=doc["company_name"],
+        company_size=doc.get("company_size"),
+        company_sector=doc.get("company_sector"),
+      )
+    )
+    # el admin del SaaS conserva su rol, como en OrganizationService.create
+    role = Role.ADMIN if doc.get("role") == Role.ADMIN else Role.ORG_ADMIN
+    await db["users"].update_one(
+      {"_id": doc["_id"]}, {"$set": {"organization_id": organization.id, "role": role}}
+    )
+    logfire.info("Migrated company of {email} to organization", email=doc.get("email"))
+  # tamaño o sector sin nombre no dan para una organización: se pierden
+  fields = ("company_name", "company_size", "company_sector")
+  await db["users"].update_many(
+    {"$or": [{f: {"$exists": True}} for f in fields]}, {"$unset": {f: "" for f in fields}}
+  )
 
 
 async def mongo_client(uri: str, db_name: str):
@@ -163,6 +206,7 @@ class Container(containers.DeclarativeContainer):
       "src.presentation.api.router.assistant",
       "src.presentation.api.router.transcription",
       "src.presentation.api.router.events",
+      "src.presentation.api.router.organization",
       "src.presentation.middleware.auth",
 
       "src.infrastructure.driving.gmail_webhook",
@@ -230,6 +274,28 @@ class Container(containers.DeclarativeContainer):
   subscription_repository = providers.Factory(MongoSubscriptionRepository, db=db)
   subscription_service = providers.Factory(
     SubscriptionService, repository=subscription_repository
+  )
+
+  # sin api key no se envía nada; el remitente tiene que ser de un dominio verificado en Resend
+  config.resend_api_key.from_env("RESEND_API_KEY", "")
+  config.resend_from.from_env("RESEND_FROM", "Cunplo <no-reply@cunplo.com>")
+  config.frontend_url.from_env("FRONTEND_REDIRECT", "http://localhost:3000")
+  resend_service = providers.Singleton(
+    ResendService,
+    api_key=config.resend_api_key,
+    sender=config.resend_from,
+    frontend_url=config.frontend_url,
+  )
+
+  organization_repository = providers.Factory(MongoOrganizationRepository, db=db)
+  invitation_repository = providers.Factory(MongoInvitationRepository, db=db)
+  organization_service = providers.Factory(
+    OrganizationService,
+    repository=organization_repository,
+    invitations=invitation_repository,
+    users=user_service,
+    storage=storage,
+    mailer=resend_service,
   )
 
   usage_repository = providers.Factory(MongoUsageRepository, db=db)

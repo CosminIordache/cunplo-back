@@ -73,6 +73,12 @@ A user may have **several accounts per provider**. The unique key is `(user_id, 
 
 `gmail_service.disconnect` is the only delete path: it stops the watch and revokes the grant at Google, and tolerates a dead token (log, delete anyway). `DELETE /integrations/{id}` and `DELETE /users/{id}` both go through it — deleting a user must not leave a live grant behind.
 
+### Organizations
+
+`Role` has three values: `ADMIN` (SaaS admin, passes `AdminUser` and the payment guards), `ORG_ADMIN` and `USER`. Membership lives on the user (`User.organization_id`, at most one org); the org row holds `name`, `picture`, `company_size` and `company_sector` (the company data used to live on `User`; `migrate_company_to_organization` in `container.py` turns each old `company_name` into an org its user administers, then unsets the fields — `ponytail:`, remove once it has run in production). `OrgId` / `AdminOrgId` guards in `middleware/auth.py` (they return the org id, 403 otherwise); `ADMIN` counts as admin inside its own org. Org endpoints only ever grant `ORG_ADMIN`/`USER`, never `ADMIN`.
+
+`OrganizationService` enforces that an org with members always keeps an admin (`LastAdmin` → 409): demote and remove/leave go through it. `DELETE /users/{id}` instead calls `remove(..., promote_successor=True)`: the last admin deleting their account makes the oldest remaining member `ORG_ADMIN` rather than blocking. The last member leaving deletes the org. Invitations are by email (lowercased, one per org+email, 7-day TTL index) and always join as `USER`. `invite` saves the row first and then mails it through `ResendService` (`resend_service.py`, inviter's language, link to the front's `/invitation/{id}`, which keeps the id so onboarding accepts it); a failed send is logged, never raised, and re-inviting re-sends. The invitee also sees them in `GET /organizations/invitations`, and only the matching email can accept. Leaving resets `ORG_ADMIN` to `USER`. Sharing data with the org is not built yet.
+
 ### Contacts
 
 `Contact.email` is optional — a contact may have only a phone (E.164, `normalize_phone` in `contact_service.py`), and the phone is kept on purpose. Both `(user_id, email)` and `(user_id, phone)` are unique **partial** indexes. `resolve_contacts` in `contacts_filter.py` looks up by email, else by phone (`is_known_contact` by the sender's email only); an email contact whose phone already belongs to someone else (a switchboard) is created without the phone.
@@ -107,7 +113,7 @@ Gmail push expires after 7 days. The daily `renew_watches` cron at 04:00 renews 
 Env vars are read at import time from `.env` via `load_dotenv()` — in `src/main.py` for the API and again in `worker.py`, since the worker is a separate process.
 
 - Required, raise at import: `JWT_SECRET`, `ENCRYPTION_KEY` (a Fernet key). `CORS_ORIGINS` is `.split(",")` unconditionally and will `AttributeError` if unset.
-- Optional: `MONGO_URI` / `MONGO_DB` (`mongodb://localhost:27017`, `cunplo`), `REDIS_URI` (`redis://localhost:6379`), `JWT_TTL_DAYS` (1), `COOKIE_SECURE` / `COOKIE_DOMAIN`, `GOOGLE_CLIENT_ID` / `GOOGLE_SECRET`, `PUBSUB_TOPIC` (empty disables the Gmail watch), `PUBSUB_TOKEN`, `FRONTEND_REDIRECT`, `SESSION_SECRET`, `ENV` (Logfire environment), `OPENAI_API_KEY`.
+- Optional: `MONGO_URI` / `MONGO_DB` (`mongodb://localhost:27017`, `cunplo`), `REDIS_URI` (`redis://localhost:6379`), `JWT_TTL_DAYS` (1), `COOKIE_SECURE` / `COOKIE_DOMAIN`, `GOOGLE_CLIENT_ID` / `GOOGLE_SECRET`, `PUBSUB_TOPIC` (empty disables the Gmail watch), `PUBSUB_TOKEN`, `FRONTEND_REDIRECT` (also the base of links in emails), `RESEND_API_KEY` (empty disables emails) / `RESEND_FROM` (a sender on a domain verified in Resend), `SESSION_SECRET`, `ENV` (Logfire environment), `OPENAI_API_KEY`.
 
 Mongo and Redis being down are logged, not fatal — both processes start either way (`queue` is then `None`).
 

@@ -16,6 +16,9 @@ def _to_document(user: User) -> dict:
 def _to_user(document: dict) -> User:
   document = dict(document)
   document["id"] = document.pop("_id")
+  # ponytail: la empresa pasó a la organización; filas que create_indexes aún no ha limpiado
+  for key in ("company_name", "company_size", "company_sector"):
+    document.pop(key, None)
   if isinstance(document.get("only_contacts"), str):
     document["only_contacts"] = document["only_contacts"] in ("all", "email")
   return User(**document)

@@ -6,6 +6,7 @@ from src.container import Container
 from src.application.use_cases.contact_service import ContactService
 from src.application.use_cases.gmail_service import GmailService
 from src.application.use_cases.integration_service import IntegrationService
+from src.application.use_cases.organization_service import OrganizationService
 from src.application.use_cases.subscription_service import SubscriptionService
 from src.application.use_cases.task_service import TaskService
 from src.application.use_cases.user_service import EmailAlreadyUsed, UserService
@@ -29,6 +30,9 @@ Contacts = Annotated[ContactService, Depends(Provide[Container.contact_service])
 Tasks = Annotated[TaskService, Depends(Provide[Container.task_service])]
 Subscriptions = Annotated[
   SubscriptionService, Depends(Provide[Container.subscription_service])
+]
+Organizations = Annotated[
+  OrganizationService, Depends(Provide[Container.organization_service])
 ]
 
 @router.get("/list", response_model=list[UserOut])
@@ -110,11 +114,16 @@ async def delete_user(
   tasks: Tasks,
   subscriptions: Subscriptions,
   gmail_service: Gmail,
+  organizations: Organizations,
   current: CurrentUser,
   response: Response,
 ):
   if id != current.id:
     raise HTTPException(status.HTTP_403_FORBIDDEN, "not your user")
+  # antes que nada: sale de su organización. Si era su último admin, otro miembro pasa
+  # a serlo; si era el último miembro, la organización se borra con él
+  if current.organization_id:
+    await organizations.remove(current.organization_id, id, promote_successor=True)
   # primero las integraciones: si el borrado falla, mejor sobra una revocación que un acceso vivo
   for integration in await integrations.list_by_user(id):
     await gmail_service.disconnect(integration)
