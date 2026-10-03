@@ -57,12 +57,16 @@ class MongoSubscriptionRepository:
       "$switch": {
         "branches": [
           {"case": {"$eq": ["$status", SubscriptionStatus.CANCELED]}, "then": SubscriptionStatus.CANCELED},
-          {"case": {"$lte": ["$expires_at", now]}, "then": SubscriptionStatus.EXPIRED},
+          {"case": {"$and": [
+            # en una expresión $lte compara por orden BSON y null/ausente va antes que
+            # cualquier fecha: sin este guard un plan sin caducidad salía EXPIRED
+            {"$eq": [{"$type": "$expires_at"}, "date"]},
+            {"$lte": ["$expires_at", now]},
+          ]}, "then": SubscriptionStatus.EXPIRED},
         ],
         "default": "$status",
       }
     }
-    # expires_at null nunca es <= now en Mongo, así que un plan sin caducidad cae al default
     by_status = {s: 0 for s in SubscriptionStatus}
     async for row in self.collection.aggregate(
       [{"$group": {"_id": derived, "count": {"$sum": 1}}}]
