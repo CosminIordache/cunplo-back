@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from typing import Optional
 
 from bson import ObjectId
@@ -193,8 +194,20 @@ class OrganizationService:
   async def cancel_invitation(self, organization_id: ObjectId, invitation_id: ObjectId) -> bool:
     return await self.invitations.delete(invitation_id, {"organization_id": organization_id})
 
-  async def my_invitations(self, user: User) -> list[Invitation]:
-    return await self.invitations.list_by_email(user.email.lower())
+  async def my_invitations(self, user: User) -> list[dict]:
+    """Las recibidas, con la organización como es ahora: nombre actual (la invitación
+    guarda el de cuando se mandó) e imagen firmada, que el invitado no puede pedir
+    por su cuenta porque aún no es miembro.
+    ponytail: una consulta por invitación; son pocas por usuario"""
+    received = []
+    for invitation in await self.invitations.list_by_email(user.email.lower()):
+      organization = await self.get(invitation.organization_id)
+      received.append({
+        **asdict(invitation),
+        "organization_name": organization.name if organization else invitation.organization_name,
+        "organization_picture": organization.picture if organization else None,
+      })
+    return received
 
   async def accept(self, user: User, invitation_id: ObjectId) -> Organization:
     """El email del usuario lo verificó Google al entrar: solo el invitado puede aceptarla."""

@@ -49,6 +49,8 @@ class InvitationOut(BaseModel):
   id: Annotated[str, BeforeValidator(str)]
   organization_id: Annotated[str, BeforeValidator(str)]
   organization_name: str
+  # solo en las recibidas: URL firmada de la imagen de la organización
+  organization_picture: Optional[str] = None
   email: str
   invited_by: Annotated[str, BeforeValidator(str)]
   expires_at: datetime
